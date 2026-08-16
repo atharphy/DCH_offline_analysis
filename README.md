@@ -10,6 +10,19 @@ It is a curated copy of a larger working area: only the scripts, modules, and re
 needed to run the two main event-selection macros and the plotting scripts are included. Comments
 have been stripped from all `.C`/`.h` files; this README is the documentation instead.
 
+> Looking for the previous, shorter version of this document? See `README_v1_backup.md`.
+
+## Table of contents
+
+1. [Layout](#layout)
+2. [What is *not* included](#what-is-not-included)
+3. [Prerequisites](#prerequisites)
+4. [Complete step-by-step workflow (condor)](#complete-step-by-step-workflow-condor)
+5. [Running interactively (no condor)](#running-interactively-no-condor)
+6. [Corrections and systematics applied](#corrections-and-systematics-applied)
+7. [Adding a new systematic](#adding-a-new-systematic)
+8. [Full configuration reference](#full-configuration-reference)
+
 ## Layout
 
 ```
@@ -102,102 +115,198 @@ not a personal path, so left as-is). Two different working-directory conventions
 - **Main pipeline** (everything at the repo root, plus `batch/`): run with the repository root as
   the current working directory (`Dependencies/...`, `hists/...`, `json_files/...` etc. are all
   relative to there) -- exactly as they were originally (`cd Offline_framework/offline_analysis`
-  before invoking `root`).
+  before invoking `root`). All `batch/*.sub`/`run_*.sh` files already `cd` there for you.
 - **`derivation_scripts/*/`**: run with that script's own subfolder as the working directory (e.g.
   `cd derivation_scripts/tau_fr_systematics` before invoking `root`) -- they reach the shared
   `Dependencies/`, `filemap/`, `include/`, `json_files/` via `../../`, and write their own
   intermediate output into a local subfolder (e.g. `results/`, `output/`) next to themselves.
 
-## Compiling and running the full pipeline
+## Complete step-by-step workflow (condor)
 
-Every script here is a ROOT macro compiled with ACLiC -- the trailing `+` on `root -l -b -q
-'Script.C+(...)'` is what triggers compilation (a `Script_C.so`/`.d`/`_ACLiC_dict_rdict.pcm` get
-built next to the source the first time; ACLiC only recompiles when the source changes, so
-subsequent runs of the same script can drop the `+` if you prefer, though leaving it on is harmless
-and safest). `gSystem->CompileMacro("Script.C","fkO")` from an interactive `root` session is
-equivalent and useful for a syntax-only check without running `main()`.
+This walks through the entire pipeline exactly as it's meant to be run at scale: event selection
+via condor, then plotting via condor, including the one manual step people most often trip on --
+**the plotting scripts don't take an input directory as a command-line argument.** `INPUT_DIR` and
+`OUTPUT_DIR` are `static std::string` constants compiled into `Stackhist.C` /
+`Stackhist_multiplicity.C` / `YieldPlots.C`. If you point `DCH_tauFR.C`/`DCH_tight.C` at a new
+output location (a new `outDirBase`, e.g. because you changed a correction and don't want to
+overwrite the old histograms), the plotting scripts will keep reading the *old* location until you
+edit their `INPUT_DIR` to match and recompile. Step 5 below is exactly that.
 
-### 0. Environment (once per shell)
-
-```
-source /cvmfs/cms.cern.ch/cmsset_default.sh
-cd $CMSSW_BASE/src        # the CMSSW area this repo is checked out under
-eval `scramv1 runtime -sh`
-cd Offline_framework/offline_analysis   # repository root -- see the working-directory note above
-```
-
-`DCH_tauFR.C` and `DCH_tight.C` additionally need `correctionlib` on the include/library path
-(everything else in this repo does not):
+### Step 0 -- one-time setup
 
 ```
-CORR_BASE=/cvmfs/cms.cern.ch/el9_amd64_gcc11/external/py3-correctionlib/2.1.0-6dc02863165bc2126b8299c5b63785af/lib/python3.9/site-packages/correctionlib
-export ROOT_INCLUDE_PATH="${CORR_BASE}/include:${ROOT_INCLUDE_PATH:-}"
-export LD_LIBRARY_PATH="${CORR_BASE}/lib:${LD_LIBRARY_PATH:-}"
+git clone git@github.com:atharphy/DCH_offline_analysis.git $CMSSW_BASE/src/Offline_framework/offline_analysis
+cd $CMSSW_BASE/src/Offline_framework/offline_analysis
 ```
 
-(`batch/run_dch.sh` sets these same two exports for the batch jobs -- copy the version number from
-there if the `correctionlib` CVMFS build has moved on since this was written.)
+Place (or symlink) `HTT-utilities/RecoilCorrections` at `$CMSSW_BASE/src/HTT-utilities/RecoilCorrections`
+and build it (`scram b` from `$CMSSW_BASE/src`) -- see [Prerequisites](#prerequisites). Get an X.509
+grid proxy and update `x509userproxy` in every `batch/*.sub` file to point at it (and update
+`request_memory`/`+JobFlavour` to taste). If this repo lives under a different `$CMSSW_BASE` or a
+different username than the one it was built under, update the CMSSW path baked into every
+`batch/run_*.sh` (`cd /afs/.../CMSSW_13_0_10/src`) to match.
 
-### 1. Event selection -> histograms
-
-```
-root -l -b -q 'DCH_tauFR.C+("2018", 0, -1, 8)'      # year, firstEntry, nEntries(-1=all), nWorkers
-root -l -b -q 'DCH_tight.C+("2018", 0, -1, 8)'
-```
-
-Repeat per year (`2016preVFP`, `2016postVFP`, `2017`, `2018`). `DCH_tauFR.C` produces the
-loose-to-tight fake-rate-weighted histograms (jet->tau, jet->electron, electron->tau fake
-contributions applied as event weights, plus the full systematic-variant set -- see "Adding a new
-systematic" below); `DCH_tight.C` produces the tight-selection-only baseline without the fake-rate
-machinery. Both read `DCH_modules/CommonConfig.h` for the top-level correction toggles
-(`APPLY_OFFICIAL_MET_CORRECTION`, `APPLY_ZPT_REWEIGHTING`, `APPLY_DY_RECOIL_CORRECTION`,
-`APPLY_WJ_RECOIL_CORRECTION`, `USE_CUSTOM_RECOIL_CORRECTIONS`) and write output under `outDirBase`
-(a relative path, `hists/...`, near the top of each file -- created under the repository root at
-runtime; point it elsewhere, e.g. your own EOS workspace, if you'd rather not keep multi-GB
-histogram output inside the repo checkout).
-
-### 2. Plotting (reads step 1's output)
+### Step 1 -- submit event selection (`DCH_tauFR.C`)
 
 ```
-root -l -b -q 'Stackhist.C+("2018", 0, -1)'          # year, firstVar, nVars(-1=all)
-root -l -b -q 'Stackhist_multiplicity.C+("2018", 0, -1)'
-root -l -b -q 'YieldPlots.C+("2018")'                # also accepts "Run2"
+cd batch
+condor_submit dch_tauFR.sub
 ```
 
-These read `DCH_tauFR.C`/`DCH_tight.C`'s `hists/...` output back in via their own `INPUT_DIR` and
-write plots to `OUTPUT_DIR` (also relative, also overridable) -- `INPUT_DIR` must point at whichever
-of the two step-1 outputs the plot is meant to compare against data, so keep it in sync with
-whichever `outDirBase` you actually ran.
+This queues 4 jobs (one per year: `2016preVFP`, `2016postVFP`, `2017`, `2018` -- see the `queue year
+in (...)` line in `dch_tauFR.sub`), each running `root -l -b -q 'DCH_tauFR.C+("<year>",0,-1,8)'`
+with 8 CPUs / 16 GB (`request_cpus`/`request_memory` in the `.sub` file; `8` is also the
+`nProc` argument passed to `DCH_tauFR.C`, i.e. how many worker processes `ROOT::TProcessExecutor`
+spreads the input files across -- keep these two in sync if you change one). Output lands under
+`DCH_tauFR.C`'s `outDirBase` (a relative path near the top of the file, currently
+`hists/run2_hists_tauFR_etau_roccor`), one subfolder per year:
+`hists/run2_hists_tauFR_etau_roccor/<year>/hist_<process>.root`.
 
-### 3. Normalization fits (independent of steps 1-2, reads `DCH_tight.C`'s output directly)
+**Alternative: one job per input file.** `dch_tauFR_perfile.sub` queues one job per `(year, idx)`
+pair from `filelist.txt` (240 jobs total -- regenerate this list with
+`root -l -b -q 'batch/MakeFileList.C+'` if the input file counts in `filemap/FileMap.h` change),
+each single-threaded (`request_cpus = 1`, `nProc=1`, `nFilesToRun=1`). This is finer-grained and
+more condor-friendly for a busy pool, at the cost of many more, smaller jobs; use whichever suits
+the batch system's current load. Both variants write into the exact same `outDirBase` layout.
+
+### Step 2 -- submit event selection (`DCH_tight.C`)
+
+```
+condor_submit dch_tight.sub          # or dch_tight_perfile.sub
+```
+
+Same mechanics as step 1, but for the tight-baseline (no fake-rate) selection. Output goes to
+`DCH_tight.C`'s own `outDirBase` (currently `hists/run2_hists_noFR_reccor`) -- deliberately a
+*different* directory from step 1's, since the two are different selections and several plotting
+scripts (`Stackhist_multiplicity.C`, `YieldPlots.C`, `roofit_wz.C`, `roofit_zz.C`) read from this
+one specifically.
+
+### Step 3 -- check the jobs
+
+```
+condor_q $USER
+```
+
+Once everything shows `0 idle, 0 running` (or is gone from the queue), check `batch/logs/*.err` for
+any job that didn't produce output, and confirm the expected `.root` files exist:
+
+```
+ls hists/run2_hists_tauFR_etau_roccor/2018/
+ls hists/run2_hists_noFR_reccor/2018/
+```
+
+### Step 4 -- (only if you changed `outDirBase`) update the plotting scripts' `INPUT_DIR`/`OUTPUT_DIR`
+
+If you ran steps 1-2 straight out of the box, `INPUT_DIR` in the plotting scripts already matches
+and you can skip to step 5. If you changed `outDirBase` in `DCH_tauFR.C`/`DCH_tight.C` (e.g. to
+`hists/run2_hists_tauFR_myNewCorrection`) to avoid overwriting a previous production, update the
+matching `INPUT_DIR` (and, if you want the new plots kept separate from old ones, `OUTPUT_DIR`) at
+the top of the plotting script(s) that read it, then force ACLiC to recompile:
+
+| Script | reads (`INPUT_DIR`) | writes (`OUTPUT_DIR`) |
+|---|---|---|
+| `Stackhist.C` | `DCH_tauFR.C`'s `outDirBase` | `plots/run2_plots_tauFR_etau_roccor/` |
+| `Stackhist_multiplicity.C` | `DCH_tight.C`'s `outDirBase` | `multiplicity_plots/run2_plots_noFR_roccor/` |
+| `YieldPlots.C` | `DCH_tauFR.C`'s `outDirBase` | `yield_plot/run2_plots_tauFR_roccor_updated_SF/` |
+| `roofit_wz.C` / `roofit_zz.C` | `DCH_tight.C`'s `outDirBase` (local `inputDir` inside the function) | `normfits/` |
+
+```
+sed -i 's|hists/run2_hists_tauFR_etau_roccor/|hists/run2_hists_tauFR_myNewCorrection/|' Stackhist.C
+rm -f Stackhist_C.so Stackhist_C.d Stackhist_C_ACLiC_dict_rdict.pcm   # ACLiC's stale-header cache
+root -l -b -q -e 'gSystem->CompileMacro("Stackhist.C","fkO")'        # confirm it compiles before submitting
+```
+
+(ACLiC normally notices when the `.C` file itself changed and recompiles automatically on the next
+`+`-suffixed run; deleting the cached `.so`/`.d`/`.pcm` first is just a guaranteed-clean way to force
+it, useful if you're not sure a change was picked up.) Repeat for whichever of the four scripts in
+the table above needs to point at the new location.
+
+### Step 5 -- submit the stacked-plot jobs
+
+```
+condor_submit stackhist.sub               # reads DCH_tauFR.C's output
+condor_submit stackhist_multiplicity.sub  # reads DCH_tight.C's output
+```
+
+Each queues 40 jobs from `batch/filelist_stackhist.txt` -- 8 chunks of 4 variables (there are 32
+plotted variables total, see `Stack_modules/StackConfig.h`'s `allVariables`) times 5 periods
+(`2016preVFP`, `2016postVFP`, `2017`, `2018`, `Run2`). Each job runs
+`root -l -b -q 'Stackhist.C+("<year>",<first>,4)'` (or `Stackhist_multiplicity.C`). If you add or
+remove plotted variables so the total is no longer a multiple of 4, either adjust the `4` in
+`stackhist.sub`'s `arguments` line to a divisor of the new total, or regenerate
+`filelist_stackhist.txt` by hand (`year,first` pairs, `first` stepping by whatever chunk size you
+pick, one block of periods `2016preVFP/2016postVFP/2017/2018/Run2` per chunk-size sweep).
+
+**Final plots land in:**
+```
+plots/run2_plots_tauFR_etau_roccor/<year>/              # Stackhist.C
+multiplicity_plots/run2_plots_noFR_roccor/<year>/       # Stackhist_multiplicity.C
+```
+(`OUTPUT_DIR` + `/<year>/`, per `Stackhist.C`'s `const std::string outdir = ensureTrailingSlash(OUTPUT_DIR) + year + "/";`)
+-- one `.png`/`.pdf` per (variable, region, final-state-group) combination.
+
+### Step 6 -- submit the yield-table jobs
+
+```
+condor_submit yieldplots.sub
+```
+
+5 jobs (4 years + `Run2`), each `root -l -b -q 'YieldPlots.C+("<year>")'`. **Final plots/tables land
+in** `yield_plot/run2_plots_tauFR_roccor_updated_SF/<year>/` (`YieldPlots.C`'s `OUTPUT_DIR` +
+`/<year>`).
+
+### Step 7 -- WZ/ZZ normalization fits (not batched -- quick enough to run interactively)
 
 ```
 root -l -b -q 'roofit_wz.C+("Run2")'
 root -l -b -q 'roofit_zz.C+("Run2")'
 ```
 
-### Batch (HTCondor)
+Reads `DCH_tight.C`'s output (`inputDir` inside the function, currently
+`hists/run2_hists_noFR_roccor/` -- update this the same way as step 4 if `DCH_tight.C`'s
+`outDirBase` changed), fits the process normalization in a control region, prints the plot to
+`normfits/plots/roofit_wz_<region>_<year>.png`, and updates
+`Dependencies/wz_zz_scale_factors/{wz,zz}_scale_factors.csv` in place (read-modify-write -- it reads
+the existing CSV, replaces/adds this year's row, and rewrites the file, so previous years' fitted
+values survive re-running for a single year).
+
+### Recap: where everything ends up
 
 ```
-cd batch
-condor_submit dch_tauFR.sub          # 4 jobs, one per year, 8 cores/16GB each
-condor_submit dch_tight.sub
-condor_submit stackhist.sub          # chunked over (year, variable-range) pairs, see filelist_stackhist.txt
-condor_submit stackhist_multiplicity.sub
-condor_submit yieldplots.sub         # 5 jobs: 4 years + Run2
+hists/run2_hists_tauFR_etau_roccor/<year>/     <- DCH_tauFR.C
+hists/run2_hists_noFR_reccor/<year>/           <- DCH_tight.C
+plots/run2_plots_tauFR_etau_roccor/<year>/     <- Stackhist.C            (final plots)
+multiplicity_plots/run2_plots_noFR_roccor/<year>/ <- Stackhist_multiplicity.C (final plots)
+yield_plot/run2_plots_tauFR_roccor_updated_SF/<year>/ <- YieldPlots.C    (final plots/tables)
+normfits/plots/                                <- roofit_wz.C / roofit_zz.C (final plots)
+Dependencies/wz_zz_scale_factors/*.csv         <- roofit_wz.C / roofit_zz.C (updated in place)
 ```
 
-`batch/MakeFileList.C` regenerates `filelist.txt`/`filelist_stackhist.txt` from `filemap/FileMap.h`'s
-actual per-year file counts if the input file lists change.
+All of these are relative to the repository root and get created automatically (`gSystem->mkdir(...,
+kTRUE)`) the first time each script runs -- nothing needs to be created by hand.
 
-Every `.sub`/`run_*.sh` file has the CMSSW area path, grid-proxy path, and `correctionlib` CVMFS
-path hardcoded to the environment this was built in -- update those three before submitting from a
-different account or CMSSW area.
+## Running interactively (no condor)
+
+Same scripts, same environment (source `/cvmfs/cms.cern.ch/cmsset_default.sh`, `cmsenv`, plus the
+`correctionlib` exports for `DCH_tauFR.C`/`DCH_tight.C` -- see `batch/run_dch.sh` for the exact
+three lines), just invoked directly instead of via `condor_submit`:
+
+```
+root -l -b -q 'DCH_tauFR.C+("2018", 0, -1, 8)'      # year, firstEntry, nEntries(-1=all), nWorkers
+root -l -b -q 'DCH_tight.C+("2018", 0, -1, 8)'
+root -l -b -q 'Stackhist.C+("2018", 0, -1)'          # year, firstVar, nVars(-1=all)
+root -l -b -q 'Stackhist_multiplicity.C+("2018", 0, -1)'
+root -l -b -q 'YieldPlots.C+("2018")'                # also accepts "Run2"
+root -l -b -q 'roofit_wz.C+("Run2")'
+root -l -b -q 'roofit_zz.C+("Run2")'
+```
+
+`gSystem->CompileMacro("Script.C","fkO")` from an interactive `root` session compiles without
+running `main()` -- useful as a syntax-only check.
 
 ### Derivation scripts (only if a correction/fake-rate/systematic input needs regenerating)
 
-Run from inside the script's own subfolder (see the working-directory note above), same
-environment as step 0:
+Run from inside the script's own subfolder (see the working-directory note above):
 
 ```
 cd derivation_scripts/tau_fr_systematics
@@ -303,3 +412,130 @@ flavor flag), appended to `frSourceVariants` where `DCH_tauFR.C` builds the fake
 how `frDyMc`/`frWJets`/`frWJetsMc`/`frQcdMc`/`frTtMc` are already wired via
 `DCH_modules/TauFRSystematics.h` and `Dependencies/systematics/results/<source>/`. Step 2 (registering
 in both `SystematicSources.h` files) is identical either way.
+
+## Full configuration reference
+
+Every user-facing toggle, threshold, list, and lookup table in the framework, by file. All of these
+are plain constants near the top of their file -- change the value, delete that file's ACLiC cache
+(`*_C.so`/`.d`/`_ACLiC_dict_rdict.pcm`) if you're not relying on an automatic recompile, and rerun.
+
+### `DCH_modules/CommonConfig.h` -- top-level correction toggles (read by both `DCH_tauFR.C` and `DCH_tight.C`)
+
+| Name | Default | Effect |
+|---|---|---|
+| `APPLY_OFFICIAL_MET_CORRECTION` | `true` | Apply the official MET phi-modulation correction (`METCorrections.h`) |
+| `APPLY_ZPT_REWEIGHTING` | `true` | Apply Z pT reweighting to DY MC (`ZPtReweight.h`) |
+| `APPLY_DY_RECOIL_CORRECTION` | `true` | Apply MET recoil correction to DY MC |
+| `APPLY_WJ_RECOIL_CORRECTION` | `false` | Apply MET recoil correction to W+jets MC |
+| `USE_CUSTOM_RECOIL_CORRECTIONS` | `true` | Use the re-derived per-year `TypeI-PFMet_<year>.root` payloads instead of HTT's stock Run2016BtoH-combined ones (`RecoilCorrections.h`) |
+| `NlepMax` | `4` | Max leptons per event the framework's fixed-size arrays (`h_pt[NlepMax]`, etc.) support -- raising this needs matching branches (`pt_5`, ...) in the input ntuple, not just this constant |
+| `finalStates` | 45 category strings | Every lepton-flavor final state the framework recognizes (2- through 4-lepton) |
+
+### `DCH_modules/RoccoRCorrections.h`
+
+| Name | Default | Effect |
+|---|---|---|
+| `APPLY_ROCCOR_DATA` | `true` | Apply Rochester correction to data muons |
+| `APPLY_ROCCOR_MC` | `true` | Apply Rochester correction (spread/scale) to MC muons |
+
+### `DCH_modules/FlatXsecSystematic.h`
+
+`kFlatXsecUncertainties`: a `(filename-prefix, fractional uncertainty)` list -- the flat
+cross-section-normalization systematic (`_xsecUp`/`_xsecDown`) applied per process, matched by
+input filename prefix (`baseName.rfind(prefix, 0) == 0`). Add a new process by appending
+`{"MyNewSample", 0.05}` (5% uncertainty); any file whose name doesn't match any entry gets `0.0`
+(no `_xsec` variant produced for it).
+
+### `DCH_modules/HistUtils.h` -- raw per-lepton/per-event histogram binning
+
+`S_mZ1`, `S_mZ2`, `S_mH1`, `S_mH2`, `S_zPt`, `S_met`, `S_metphi`, `S_LT`, and the per-lepton
+`S_pt[NlepMax]`, `S_eta[NlepMax]`, `S_phi[NlepMax]`, `S_d0[NlepMax]`, `S_dZ[NlepMax]`,
+`S_iso[NlepMax]` -- each a `{name, title, bins, xmin, xmax}` `HistSpec`. This is the binning
+`DCH_tauFR.C`/`DCH_tight.C` actually fill at production time (deliberately fine -- e.g. 1000 bins,
+0-1000 GeV for `mZ1`); `Stack_modules/StackConfig.h`'s `binning` map (below) rebins these down for
+plotting. Change a range here only if events are landing outside it (they'd silently fall in the
+under/overflow bin and not show up).
+
+### `DCH_modules/TauFRSystematics.h`
+
+- `kTauFRSystematicsBase` (`"Dependencies/systematics/results"`): where the 5 fake-rate systematic
+  sources are read from.
+- `kTauFRSystematicSources`: the 5 `(directory-name, suffix)` pairs -- `dy_mc`/`DyMc`,
+  `wjets_data`/`WJets`, `wjets_mc`/`WJetsMc`, `qcd_mc`/`QcdMc`, `tt_mc`/`TtMc`. Adding a 6th source
+  needs a matching subfolder under `Dependencies/systematics/results/`, a new entry here, a new
+  `FRSystSource` pushed onto `frSourceVariants` in `DCH_tauFR.C` (see "Adding a new systematic"
+  above), and a new line in both `SystematicSources.h` files.
+
+### `include/Xsections.C`
+
+`XSec(filename)`: a long `if/else if` chain matching MC filename substrings to their cross section
+in pb (data files return `1`; a file matching nothing falls through -- check the bottom of the
+function for the default). To add a new MC sample, add a new `else if (fname.find("MySample") <
+fname.length()) return <xsec_in_pb>;` line, and add the file to the relevant process group in
+`filemap/FileMap.h`'s `getFileMap(year)`.
+
+### `Stack_modules/StackConfig.h` -- plotting-stage configuration (`Stackhist.C`/`Stackhist_multiplicity.C`)
+
+| Name | Purpose |
+|---|---|
+| `year` | Set at runtime from the script's `inYear` argument; used by `Labels.h`'s luminosity label |
+| `SIGNAL_MASS_FILTER` | If non-empty, only this H++ mass point (e.g. `"HppM500"`) is drawn as the signal overlay |
+| `binning` | `variable -> {nbins, xmin, xmax}` (or a `variable:region -> ...` override, e.g. `"mZ1:SR"`) rebin map applied on top of the fine production binning from `HistUtils.h` |
+| `allVariables` | The 32 variables plotted -- this list's length determines how `batch/filelist_stackhist.txt` should be chunked (currently groups of 4) |
+| `finalStates` | Lepton-flavor final states considered for grouping/labeling |
+| `regions` | All 23 analysis regions (`DYCR_*`, `CR_*`, `VR_*`, `SR_*`) the stacking code recognizes by histogram-name suffix |
+
+Also in `Stackhist.C`/`Stackhist_multiplicity.C` themselves (top of file, before the `#include
+"Stack_modules/..."` lines -- these have to be defined before the headers that use them):
+
+| Name | Default (`Stackhist.C`) | Default (`Stackhist_multiplicity.C`) | Effect |
+|---|---|---|---|
+| `DRAW_BANDS` | `true` | `true` | Draw the total-systematic uncertainty band on the stack |
+| `USE_LOG_Y` | `false` | `false` | Log-scale y-axis |
+| `EVENTS_PER_BIN_WIDTH` | `false` | `false` | Divide bin content by bin width (for variable-width binning) |
+| `blind_SR` | `true` | *(not defined -- always unblinded)* | Blind the data points in `SR_*`-suffixed regions |
+| `INPUT_DIR` | `hists/run2_hists_tauFR_etau_roccor/` | `hists/run2_hists_noFR_roccor/` | Where to read `DCH_tauFR.C`/`DCH_tight.C` output from |
+| `OUTPUT_DIR` | `plots/run2_plots_tauFR_etau_roccor/` | `multiplicity_plots/run2_plots_noFR_roccor/` | Where plots are written |
+| `fill_colors` (inside the `Stackhist(...)`/`Stackhist_multiplicity(...)` function body) | 14-process color map | same | ROOT color index per background process, `data`, and `signal` |
+
+The background stacking order itself (`bkgOrder`, bottom-to-top) is in `Stack_modules/StackDraw.h`:
+`DY, DY10_50, WZ, WW, ZZ, TTbar, ttV, WJ, ST, VVV, QCD, other, signal`.
+
+### `Stack_modules/SystematicSources.h` / `yield_modules/YieldSystematics.h`
+
+See [Adding a new systematic](#adding-a-new-systematic) above -- `kAllKnownSystSources` /
+`kAllSystSources` are the full registry and the drawn-envelope subset, respectively.
+
+### `yield_modules/YieldConfig.h` -- yield-table configuration (`YieldPlots.C`)
+
+| Name | Purpose |
+|---|---|
+| `kFinalStates` | Same 45 final states as `CommonConfig.h`/`StackConfig.h` (kept as an independent copy here) |
+| `kProcesses` | The 13 process groups summed into the yield table, in order |
+| `kColors` | ROOT color index per process (mirrors `Stackhist.C`'s `fill_colors`) |
+| `kLabels` | Display label per process (currently identity except `data` -> `"Data"`) |
+| `kBinSuffixes` / `kBinLabels` | The 7 category bins (`0tau`...`3lep2tau`) and their axis labels for the yield bar chart |
+| `yearsFor(year)` | Expands `"Run2"` -> all 4 years, `"2016"` -> `preVFP`+`postVFP`, else passes through |
+| `periodLabel(year)` | Integrated-luminosity label per period (keep in sync with `Stack_modules/Labels.h`'s `getLumiLabel` if luminosities are revised) |
+
+Also in `YieldPlots.C` itself (top of file): `DRAW_BANDS` (`false`), `USE_LOG_Y` (`true`),
+`blind_SR` (`true`), `INPUT_DIR` (`hists/run2_hists_tauFR_roccor/`), `OUTPUT_DIR`
+(`yield_plot/run2_plots_tauFR_roccor_updated_SF/`) -- same meaning as the `Stackhist.C` table above.
+
+### `roofit_wz.C` / `roofit_zz.C`
+
+Top of file: `SIGNAL_MASS_FILTER` (empty by default -- no signal overlay in the fit plot),
+`ZZ_SF_CSV`/`WZ_SF_CSV` (`Dependencies/wz_zz_scale_factors/{zz,wz}_scale_factors.csv` -- read *and*
+rewritten by the script). Inside the `roofit_wz(year)`/`roofit_zz(year)` function body: `region`
+(the control region fit against -- `"CR_3lep0tau"` for WZ, `"CR_0tau"` for ZZ) and `inputDir`
+(`hists/run2_hists_noFR_roccor/`, i.e. `DCH_tight.C`'s output).
+
+### `batch/*.sub` / `batch/run_*.sh`
+
+Per-job resources (`request_cpus`, `request_memory`, `request_disk`, `+JobFlavour`) and the
+environment setup (CMSSW path, `x509userproxy`, `correctionlib` CVMFS path) -- see
+[Step 0](#step-0----one-time-setup) above for what needs updating when running under a different
+account/CMSSW area. `batch/MakeFileList.C` regenerates `filelist.txt` from `filemap/FileMap.h`'s
+actual per-year file counts if the input file lists change; `filelist_stackhist.txt` is a plain
+`year,first` list and needs updating by hand if the chunk size or variable count changes (see
+[Step 5](#step-5----submit-the-stacked-plot-jobs)).
