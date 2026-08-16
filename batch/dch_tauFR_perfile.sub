@@ -1,0 +1,13 @@
+executable     = run_dch_perfile.sh
+arguments      = DCH_tauFR $(year) $(idx)
+output         = logs/dch_tauFR_$(year)_$(idx).out
+error          = logs/dch_tauFR_$(year)_$(idx).err
+log            = logs/dch_tauFR_$(year)_$(idx).log
+request_cpus   = 1
+request_memory = 3000
+request_disk   = 2000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = /afs/cern.ch/user/a/atahmad/.grid_proxy/x509up.pem
+
+queue year,idx from filelist.txt
