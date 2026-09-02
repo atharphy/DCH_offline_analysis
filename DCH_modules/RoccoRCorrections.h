@@ -1,27 +1,60 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
 
 #include "../roccor/RoccoR.cc"
 
+#include "../include/Kinematics.h"
 #include "ObjectAccessors.h"
 
 const bool APPLY_ROCCOR_DATA = true;
 const bool APPLY_ROCCOR_MC   = true;
 
+// Own GenPart-level match (deltaR < 0.3, same threshold as GenZMatching.h)
+// for the reco muon's true gen pt, rather than relying on the skim's own
+// precomputed truthPt/genPartFlav branches -- those reflect whatever
+// reco-truth-matching the skim producer did at production time, while this
+// looks at GenPart directly, so it finds a genuine prompt gen muon whenever
+// one actually exists next to the reco muon. Genuinely non-prompt/fake
+// muons still correctly find no match (there is no gen muon to find).
+inline bool findGenMuonPt(double recoEta, double recoPhi, double& genPt) {
+    if (!GenPart_pdgId || !GenPart_pt || !GenPart_eta || !GenPart_phi) return false;
+    int bestIdx = -1;
+    double bestDR = 0.3;
+    for (size_t i = 0; i < GenPart_pdgId->size(); ++i) {
+        if (std::abs((*GenPart_pdgId)[i]) != 13) continue;
+        const double dr = getDR(recoEta, recoPhi, (*GenPart_eta)[i], (*GenPart_phi)[i]);
+        if (dr < bestDR) { bestDR = dr; bestIdx = static_cast<int>(i); }
+    }
+    if (bestIdx < 0) return false;
+    genPt = (*GenPart_pt)[bestIdx];
+    return genPt > 0.0;
+}
+
 inline std::unique_ptr<RoccoR> loadRoccoRCorrections(const std::string& year) {
-    std::string fileName;
-    if (year == "2016preVFP") fileName = "roccor/RoccoR2016aUL.txt";
-    else if (year == "2016postVFP") fileName = "roccor/RoccoR2016bUL.txt";
-    else if (year == "2017") fileName = "roccor/RoccoR2017UL.txt";
-    else if (year == "2018") fileName = "roccor/RoccoR2018UL.txt";
+    std::string payload;
+    if (year == "2016preVFP") payload = "RoccoR2016aUL.txt";
+    else if (year == "2016postVFP") payload = "RoccoR2016bUL.txt";
+    else if (year == "2017") payload = "RoccoR2017UL.txt";
+    else if (year == "2018") payload = "RoccoR2018UL.txt";
     else {
         std::cerr << "ERROR: no RoccoR calibration mapped for year " << year << std::endl;
         return nullptr;
     }
+
+    // CMSSW_BASE-relative, not CWD-relative -- callers outside offline/
+    // itself (e.g. ditau_mass_study/) would otherwise resolve this wrong.
+    const char* cmsswBase = std::getenv("CMSSW_BASE");
+    if (!cmsswBase) {
+        std::cerr << "ERROR: CMSSW_BASE not set, cannot resolve RoccoR calibration" << std::endl;
+        return nullptr;
+    }
+    const std::string fileName = std::string(cmsswBase) + "/src/Offline_framework/offline/roccor/" + payload;
 
     try {
         std::unique_ptr<RoccoR> rc(new RoccoR(fileName));
@@ -47,19 +80,24 @@ inline void applyRoccoRCorrection(const std::string& cat, bool isData, const Roc
         double sf = 1.0;
         double err = 0.0;
         if (isData) {
-            if (!APPLY_ROCCOR_DATA) continue;
+            if (!APPLY_ROCCOR_CORRECTION || !APPLY_ROCCOR_DATA) continue;
             sf = rc.kScaleDT(q, pt, eta, phi);
             err = rc.kScaleDTerror(q, pt, eta, phi);
         } else {
-            if (!APPLY_ROCCOR_MC) continue;
-            const double genPt = truthPtByIndex(idx);
-            if (genPartFlavByIndex(idx) == 1 && genPt > 0.0) {
+            if (!APPLY_ROCCOR_CORRECTION || !APPLY_ROCCOR_MC) continue;
+            double genPt = 0.0;
+            if (findGenMuonPt(eta, phi, genPt)) {
                 sf = rc.kSpreadMC(q, pt, eta, phi, genPt);
                 err = rc.kSpreadMCerror(q, pt, eta, phi, genPt);
             } else {
+                // kSmearMC/kExtra call CrystalBall::invcdf(), which this
+                // framework's RoccoR.h deliberately makes throw (boost's
+                // erf_inv doesn't compile under ACLiC/cling -- see that
+                // file's own top comment). kScaleMC is purely algebraic
+                // (CP[MC][H][F].k(Q,pt), no CrystalBall at all), so it's
+                // the only usable non-gen-matched-MC correction here.
                 sf = rc.kScaleMC(q, pt, eta, phi);
-
-                err = 0.0;
+                err = rc.kScaleMCerror(q, pt, eta, phi);
             }
         }
 

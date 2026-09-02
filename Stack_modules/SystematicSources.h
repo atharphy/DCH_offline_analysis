@@ -20,11 +20,20 @@ static const std::vector<SystSource> kAllKnownSystSources = {
     {"zpt", "_zptUp", "_zptDown"},
     {"pu", "_puUp", "_puDown"},
     {"l1Prefire", "_l1PrefireUp", "_l1PrefireDown"},
-    {"metPhiCorr", "_metPhiCorrUp", "_metPhiCorrDown"},
     {"recoilResponse", "_recoilResponseUp", "_recoilResponseDown"},
     {"recoilResolution", "_recoilResolutionUp", "_recoilResolutionDown"},
     {"xsec", "_xsecUp", "_xsecDown"},
-    {"roccor", "_roccorUp", "_roccorDown"}
+    {"roccor", "_roccorUp", "_roccorDown"},
+    {"eReco", "_eRecoUp", "_eRecoDown"},
+    {"eIdIso", "_eIdIsoUp", "_eIdIsoDown"},
+    {"eTrig", "_eTrigUp", "_eTrigDown"},
+    {"muId", "_muIdUp", "_muIdDown"},
+    {"muIso", "_muIsoUp", "_muIsoDown"},
+    {"muTrig", "_muTrigUp", "_muTrigDown"},
+    {"tauVsEle", "_tauVsEleUp", "_tauVsEleDown"},
+    {"tauVsMu", "_tauVsMuUp", "_tauVsMuDown"},
+    {"tauVsJet", "_tauVsJetUp", "_tauVsJetDown"},
+    {"tauES", "_tauESUp", "_tauESDown"}
 };
 
 static const std::vector<SystSource> kAllSystSources = {
@@ -32,15 +41,26 @@ static const std::vector<SystSource> kAllSystSources = {
     {"frEtauStat", "_frEtauStatUp", "_frEtauStatDown"},
     {"frDyMc", "_frDyMcUp", "_frDyMcDown"},
     {"frWJets", "_frWJetsUp", "_frWJetsDown"},
-
+    // {"frWJetsMc", "_frWJetsMcUp", "_frWJetsMcDown"},
+    // {"frQcdMc", "_frQcdMcUp", "_frQcdMcDown"},
+    // {"frTtMc", "_frTtMcUp", "_frTtMcDown"},
     {"zpt", "_zptUp", "_zptDown"},
     {"pu", "_puUp", "_puDown"},
     {"l1Prefire", "_l1PrefireUp", "_l1PrefireDown"},
-    {"metPhiCorr", "_metPhiCorrUp", "_metPhiCorrDown"},
     {"recoilResponse", "_recoilResponseUp", "_recoilResponseDown"},
     {"recoilResolution", "_recoilResolutionUp", "_recoilResolutionDown"},
     {"xsec", "_xsecUp", "_xsecDown"},
-    {"roccor", "_roccorUp", "_roccorDown"}
+    {"roccor", "_roccorUp", "_roccorDown"},
+    {"eReco", "_eRecoUp", "_eRecoDown"},
+    {"eIdIso", "_eIdIsoUp", "_eIdIsoDown"},
+    {"eTrig", "_eTrigUp", "_eTrigDown"},
+    {"muId", "_muIdUp", "_muIdDown"},
+    {"muIso", "_muIsoUp", "_muIsoDown"},
+    {"muTrig", "_muTrigUp", "_muTrigDown"},
+    {"tauVsEle", "_tauVsEleUp", "_tauVsEleDown"},
+    {"tauVsMu", "_tauVsMuUp", "_tauVsMuDown"},
+    {"tauVsJet", "_tauVsJetUp", "_tauVsJetDown"},
+    {"tauES", "_tauESUp", "_tauESDown"}
 };
 
 inline bool endsWith(const std::string& s, const std::string& suffix) {

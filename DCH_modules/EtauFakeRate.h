@@ -13,7 +13,8 @@
 #include "TauFakeRate.h"
 #include "TauFRSystematics.h"
 
-const std::string kEtauFakeRateFile = "Dependencies/etau_fake_rates/cut_results/ETau_FakeRates_Final.root";
+const std::string kEtauFakeRateFile =
+    "Dependencies/etau_fake_rates/cut_results/ETau_FakeRates_Final.root";
 
 inline std::shared_ptr<TauFRReader> loadEtauFRReader(const std::string& year) {
     std::unique_ptr<TFile> file(TFile::Open(kEtauFakeRateFile.c_str(), "READ"));
@@ -39,6 +40,7 @@ inline std::shared_ptr<TauFRReader> getCachedEtauFRReader(const std::string& yea
     cache[year] = reader;
     return reader;
 }
+
 
 inline std::unique_ptr<TH1D> shiftFakeRateHistogramByError(const TH1D& source, const std::string& name, double sign) {
     std::unique_ptr<TH1D> result(dynamic_cast<TH1D*>(source.Clone(name.c_str())));

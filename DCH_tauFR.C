@@ -1,3 +1,20 @@
+// DCH_tauFR.C
+//
+// Compile:
+//   root -l -b -q 'DCH_tauFR.C++("2018",0,-1,1)'
+//
+// Run one file:
+//   root -l -b -q 'DCH_tauFR.C+("2018",0,1,1)'
+//
+// Run many files in one ROOT job with process parallelism:
+//   root -l -b -q 'DCH_tauFR.C+("2018",0,-1,8)'
+//
+// Alternative xargs parallelism:
+//   seq 0 50 | xargs -P 8 -I{} root -l -b -q 'DCH_tauFR.C+("2018",{},1,1)'
+//
+// Run only one process group (e.g. just the signal MC), all its files:
+//   root -l -b -q 'DCH_tauFR.C+("2018",0,-1,1,"signal")'
+
 #if !defined(__CLING__)
 #pragma GCC optimize("O3,unroll-loops")
 #endif
@@ -49,8 +66,9 @@ R__LOAD_LIBRARY(libHTT-utilitiesRecoilCorrections.so)
 #include "DCH_modules/METCorrections.h"
 #include "DCH_modules/RecoilCorrections.h"
 #include "DCH_modules/RoccoRCorrections.h"
-#include "DCH_modules/TruthMatching.h"
 #include "DCH_modules/ZPtReweight.h"
+#include "DCH_modules/GenZMatching.h"
+#include "DCH_modules/GenBosonMomentum.h"
 #include "DCH_modules/FileJob.h"
 #include "DCH_modules/TauFakeRate.h"
 #include "DCH_modules/EtauFakeRate.h"
@@ -60,6 +78,7 @@ R__LOAD_LIBRARY(libHTT-utilitiesRecoilCorrections.so)
 #include "DCH_modules/MEtSysWrapper.h"
 #include "DCH_modules/SystematicPlan.h"
 #include "DCH_modules/FlatXsecSystematic.h"
+#include "DCH_modules/TauESSystematic.h"
 
 using std::string;
 using std::vector;
@@ -68,8 +87,9 @@ using std::unordered_map;
 const bool SKIP_DATA = false;
 const bool APPLY_TAU_FAKE_RATE = true;
 const bool APPLY_ETAU_FAKE_RATE = true;
+const Long64_t CHUNK_SIZE = 500000LL;
 
-const string FR_FILE = "Dependencies/fake_rates/tau_fake_rates/DY_data_tau_fake_rate_2D.root";
+const string FR_FILE = "/afs/cern.ch/user/a/atahmad/updated_analysis/CMSSW_13_0_10/src/Offline_framework/offline/fake_rates/tau_fake_rates/DY_data_tau_fake_rate_2D.root";
 
 const vector<string> tauRegions = {
     "DYCR_0tau", "DYCR_1tau", "DYveto_0tau", "DYveto_1tau",
@@ -96,7 +116,7 @@ struct Obj {
 struct TauCand : public Obj {
     double fr = 0.0;
     double frErr = 0.0;
-    bool isEtauSource = false;
+    bool isEtauSource = false; 
 };
 
 struct FRSystSource {
@@ -217,6 +237,135 @@ double computeConfigurationObjectSF(const vector<Obj>& objs) {
     return objectSF;
 }
 
+struct ObjectSFSystEntry { string suffix; double objectSF; };
+
+// Reads the skim's own precomputed Up/Down SF branches directly (see
+// DCH_modules/ObjectAccessors.h) instead of recomputing a relative
+// uncertainty via correctionlib at analysis time. `year` is unused now but
+// kept in the signature to avoid touching the call site.
+vector<ObjectSFSystEntry> computeConfigurationObjectSFSystematics(const vector<Obj>& objs, const string& year) {
+    (void)year;
+    double eRecoUp = 1.0, eRecoDown = 1.0, eIdIsoUp = 1.0, eIdIsoDown = 1.0;
+    double muIdUp = 1.0, muIdDown = 1.0, muIsoUp = 1.0, muIsoDown = 1.0;
+    double tauVsEleUp = 1.0, tauVsEleDown = 1.0, tauVsMuUp = 1.0, tauVsMuDown = 1.0, tauVsJetUp = 1.0, tauVsJetDown = 1.0;
+
+    for (const auto& obj : objs) {
+        if (!obj.fromTight || obj.tightIdx < 1 || obj.tightIdx > 4) continue;
+        const int idx = obj.tightIdx;
+        if (obj.flav == 'e' && obj.pt > 20.0) {
+            const double idNom = idSFByIndex(idx), idUp = idSFUpByIndex(idx), idDown = idSFDownByIndex(idx);
+            if (idNom > 0.0 && idUp > 0.0 && idDown > 0.0) { eRecoUp *= idUp / idNom; eRecoDown *= idDown / idNom; }
+            const double isoNom = isoSFByIndex(idx), isoUp = isoSFUpByIndex(idx), isoDown = isoSFDownByIndex(idx);
+            if (isoNom > 0.0 && isoUp > 0.0 && isoDown > 0.0) { eIdIsoUp *= isoUp / isoNom; eIdIsoDown *= isoDown / isoNom; }
+        }
+        else if (obj.flav == 'm' && obj.pt > 15.0) {
+            const double idNom = idSFByIndex(idx), idUp = idSFUpByIndex(idx), idDown = idSFDownByIndex(idx);
+            if (idNom > 0.0 && idUp > 0.0 && idDown > 0.0) { muIdUp *= idUp / idNom; muIdDown *= idDown / idNom; }
+            const double isoNom = isoSFByIndex(idx), isoUp = isoSFUpByIndex(idx), isoDown = isoSFDownByIndex(idx);
+            if (isoNom > 0.0 && isoUp > 0.0 && isoDown > 0.0) { muIsoUp *= isoUp / isoNom; muIsoDown *= isoDown / isoNom; }
+        }
+        else if (obj.flav == 't' && genPartFlavByIndex(idx) == 5) {
+            const double vE = tauEleSFByIndex(idx), vEUp = tauEleSFUpByIndex(idx), vEDown = tauEleSFDownByIndex(idx);
+            if (vE > 0.0 && vEUp > 0.0 && vEDown > 0.0) { tauVsEleUp *= vEUp / vE; tauVsEleDown *= vEDown / vE; }
+            const double vM = tauMuSFByIndex(idx), vMUp = tauMuSFUpByIndex(idx), vMDown = tauMuSFDownByIndex(idx);
+            if (vM > 0.0 && vMUp > 0.0 && vMDown > 0.0) { tauVsMuUp *= vMUp / vM; tauVsMuDown *= vMDown / vM; }
+            const double vJ = tauJetSFByIndex(idx), vJUp = tauJetSFUpByIndex(idx), vJDown = tauJetSFDownByIndex(idx);
+            if (vJ > 0.0 && vJUp > 0.0 && vJDown > 0.0) { tauVsJetUp *= vJUp / vJ; tauVsJetDown *= vJDown / vJ; }
+        }
+    }
+
+    const double nominal = computeConfigurationObjectSF(objs);
+    return {
+        {"_eRecoUp", nominal * eRecoUp}, {"_eRecoDown", nominal * eRecoDown},
+        {"_eIdIsoUp", nominal * eIdIsoUp}, {"_eIdIsoDown", nominal * eIdIsoDown},
+        {"_muIdUp", nominal * muIdUp}, {"_muIdDown", nominal * muIdDown},
+        {"_muIsoUp", nominal * muIsoUp}, {"_muIsoDown", nominal * muIsoDown},
+        {"_tauVsEleUp", nominal * tauVsEleUp}, {"_tauVsEleDown", nominal * tauVsEleDown},
+        {"_tauVsMuUp", nominal * tauVsMuUp}, {"_tauVsMuDown", nominal * tauVsMuDown},
+        {"_tauVsJetUp", nominal * tauVsJetUp}, {"_tauVsJetDown", nominal * tauVsJetDown},
+    };
+}
+
+struct TrigSFShift { double eUp = 1.0, eDown = 1.0, muUp = 1.0, muDown = 1.0; };
+
+double muonTrigPtThreshold(const string& year) {
+    if (year == "2017") return 29.0;
+    return 26.0;
+}
+
+// Reads the skim's precomputed TrigSF_Up/Down branches directly (absolute
+// shifted values) instead of recomputing a relative uncertainty via
+// correctionlib/TGraphAsymmErrors. `year` unused now, kept for call-site
+// compatibility.
+TrigSFShift computeTriggerSFShifts(const string& catstr, const string& year) {
+    const double muTrigPtMin = muonTrigPtThreshold(year);
+
+    const int nLep = static_cast<int>(catstr.size());
+    const bool hasElectron = catstr.find('e') != string::npos;
+    const bool hasMuon = catstr.find('m') != string::npos;
+
+    TrigSFShift result;
+
+    if (hasElectron && hasMuon) {
+        double electronSF = 0.0, muonSF = 0.0;
+        int eIdx = -1, mIdx = -1;
+        for (int idx = 1; idx <= nLep; ++idx) {
+            const char flavor = catstr[idx - 1];
+            if (flavor == 't' || !trigPassedByIndex(idx)) continue;
+            if (flavor == 'e' && electronSF == 0.0) { electronSF = trigSFByIndex(idx); eIdx = idx; }
+            else if (flavor == 'm' && muonSF == 0.0) { muonSF = trigSFByIndex(idx); mIdx = idx; }
+        }
+        double nominal = 1.0;
+        if (electronSF > 0.0 && muonSF > 0.0) nominal = electronSF + muonSF - electronSF * muonSF;
+        else if (electronSF > 0.0) nominal = electronSF;
+        else if (muonSF > 0.0) nominal = muonSF;
+        result.eUp = result.eDown = result.muUp = result.muDown = nominal;
+
+        if (eIdx > 0) {
+            const double eUpSF = trigSFUpByIndex(eIdx);
+            const double eDownSF = trigSFDownByIndex(eIdx);
+            if (eUpSF > 0.0) result.eUp = (muonSF > 0.0) ? (eUpSF + muonSF - eUpSF * muonSF) : eUpSF;
+            if (eDownSF > 0.0) result.eDown = (muonSF > 0.0) ? (eDownSF + muonSF - eDownSF * muonSF) : eDownSF;
+        }
+        if (mIdx > 0 && ptByIndex(mIdx) > muTrigPtMin) {
+            const double mUpSF = trigSFUpByIndex(mIdx);
+            const double mDownSF = trigSFDownByIndex(mIdx);
+            if (mUpSF > 0.0) result.muUp = (electronSF > 0.0) ? (electronSF + mUpSF - electronSF * mUpSF) : mUpSF;
+            if (mDownSF > 0.0) result.muDown = (electronSF > 0.0) ? (electronSF + mDownSF - electronSF * mDownSF) : mDownSF;
+        }
+        return result;
+    }
+
+    int selIdx = -1;
+    double nominal = 1.0;
+    if (nLep < 3) {
+        if (isTrig_1 >= 1) { nominal = TrigSF_1; selIdx = 1; }
+        else if (isTrig_1 == -1) { nominal = TrigSF_2; selIdx = 2; }
+    }
+    else {
+        if (isTrig_1 >= 1 && isTrig_2 == 0) { nominal = TrigSF_1; selIdx = 1; }
+        else if (isTrig_1 == -1 && isTrig_2 == 0) { nominal = TrigSF_2; selIdx = 2; }
+        else if (isTrig_2 >= 1 && isTrig_1 == 0) { nominal = TrigSF_3; selIdx = 3; }
+        else if (isTrig_2 == -1 && isTrig_1 == 0) { nominal = TrigSF_4; selIdx = 4; }
+        else if (isTrig_1 == 2 && isTrig_2 == 2) { nominal = TrigSF_1; selIdx = 1; }
+    }
+    result.eUp = result.eDown = result.muUp = result.muDown = nominal;
+    if (selIdx > 0 && selIdx <= nLep) {
+        const char flavor = catstr[selIdx - 1];
+        if (flavor == 'e') {
+            const double eUpSF = trigSFUpByIndex(selIdx), eDownSF = trigSFDownByIndex(selIdx);
+            if (eUpSF > 0.0) result.eUp = eUpSF;
+            if (eDownSF > 0.0) result.eDown = eDownSF;
+        }
+        else if (flavor == 'm' && ptByIndex(selIdx) > muTrigPtMin) {
+            const double mUpSF = trigSFUpByIndex(selIdx), mDownSF = trigSFDownByIndex(selIdx);
+            if (mUpSF > 0.0) result.muUp = mUpSF;
+            if (mDownSF > 0.0) result.muDown = mDownSF;
+        }
+    }
+    return result;
+}
+
 void fillAllVars(const string& key, const vector<Obj>& objs, double weight, unordered_map<string,TH1D*>& h_mZ1, unordered_map<string,TH1D*>& h_mZ2, unordered_map<string,TH1D*>& h_mH1, unordered_map<string,TH1D*>& h_mH2, unordered_map<string,TH1D*>& h_zPt, unordered_map<string,TH1D*>& h_met, unordered_map<string,TH1D*>& h_metphi, unordered_map<string,TH1D*>& h_LT, unordered_map<string,TH1D*> h_pt[NlepMax], unordered_map<string,TH1D*> h_eta[NlepMax], unordered_map<string,TH1D*> h_phi[NlepMax], unordered_map<string,TH1D*> h_d0[NlepMax], unordered_map<string,TH1D*> h_dZ[NlepMax], unordered_map<string,TH1D*> h_iso[NlepMax])
 {
     loadObjectsIntoGlobals(objs);
@@ -316,8 +465,25 @@ void enableBranchesTauFR(TTree* t, bool isData) {
         "TauVsMuIDSF_1", "TauVsMuIDSF_2", "TauVsMuIDSF_3", "TauVsMuIDSF_4",
         "TauVsJetIDSF_1", "TauVsJetIDSF_2", "TauVsJetIDSF_3", "TauVsJetIDSF_4",
         "TauES_1", "TauES_2", "TauES_3", "TauES_4",
+        "IDSF_Up_1", "IDSF_Up_2", "IDSF_Up_3", "IDSF_Up_4",
+        "IDSF_Down_1", "IDSF_Down_2", "IDSF_Down_3", "IDSF_Down_4",
+        "ISOSF_Up_1", "ISOSF_Up_2", "ISOSF_Up_3", "ISOSF_Up_4",
+        "ISOSF_Down_1", "ISOSF_Down_2", "ISOSF_Down_3", "ISOSF_Down_4",
+        "TrigSF_Up_1", "TrigSF_Up_2", "TrigSF_Up_3", "TrigSF_Up_4",
+        "TrigSF_Down_1", "TrigSF_Down_2", "TrigSF_Down_3", "TrigSF_Down_4",
+        "TauVsEleIDSF_Up_1", "TauVsEleIDSF_Up_2", "TauVsEleIDSF_Up_3", "TauVsEleIDSF_Up_4",
+        "TauVsEleIDSF_Down_1", "TauVsEleIDSF_Down_2", "TauVsEleIDSF_Down_3", "TauVsEleIDSF_Down_4",
+        "TauVsMuIDSF_Up_1", "TauVsMuIDSF_Up_2", "TauVsMuIDSF_Up_3", "TauVsMuIDSF_Up_4",
+        "TauVsMuIDSF_Down_1", "TauVsMuIDSF_Down_2", "TauVsMuIDSF_Down_3", "TauVsMuIDSF_Down_4",
+        "TauVsJetIDSF_Up_1", "TauVsJetIDSF_Up_2", "TauVsJetIDSF_Up_3", "TauVsJetIDSF_Up_4",
+        "TauVsJetIDSF_Down_1", "TauVsJetIDSF_Down_2", "TauVsJetIDSF_Down_3", "TauVsJetIDSF_Down_4",
+        "TauES_Up_1", "TauES_Up_2", "TauES_Up_3", "TauES_Up_4",
+        "TauES_Down_1", "TauES_Down_2", "TauES_Down_3", "TauES_Down_4",
         "Generator_weight", "brWeight", "L1PreFiringWeight_Nom", "L1PreFiringWeight_Up", "L1PreFiringWeight_Down",
         "weightPUtruejson", "weightPUtruejson_up", "weightPUtruejson_down",
+        "GenPart_pt", "GenPart_eta", "GenPart_phi", "GenPart_mass",
+        "GenPart_pdgId", "GenPart_genPartIdxMother", "GenPart_status", "GenPart_statusFlags",
+        "GenVisTau_genPartIdxMother", "GenVisTau_eta", "GenVisTau_phi",
     };
     if (!isData) {
         const char* looseBrs[] = {"lpt", "leta", "lphi", "lmass", "lq", "lflavor", "liso", "ld0", "ldZ", "gen_match"};
@@ -391,7 +557,7 @@ bool overlapsAnyTauCand(const Obj& x, const vector<TauCand>& objs) {
     return false;
 }
 
-void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand>& tauCands, double evtWeight, const std::unordered_set<string>& finalStateSet, const vector<FRSystSource>& frSourceVariants, const vector<WeightSystematic>& weightVariants, const vector<MetSystematic>& metVariants, unordered_map<string,TH1D*>& h_mZ1, unordered_map<string,TH1D*>& h_mZ2, unordered_map<string,TH1D*>& h_mH1, unordered_map<string,TH1D*>& h_mH2, unordered_map<string,TH1D*>& h_zPt, unordered_map<string,TH1D*>& h_met, unordered_map<string,TH1D*>& h_metphi, unordered_map<string,TH1D*>& h_LT, unordered_map<string,TH1D*> h_pt[NlepMax], unordered_map<string,TH1D*> h_eta[NlepMax], unordered_map<string,TH1D*> h_phi[NlepMax], unordered_map<string,TH1D*> h_d0[NlepMax], unordered_map<string,TH1D*> h_dZ[NlepMax], unordered_map<string,TH1D*> h_iso[NlepMax], const vector<Obj>& baseObjectsRoccorUp, const vector<Obj>& baseObjectsRoccorDown, bool hasRoccorVariation)
+void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand>& tauCands, double evtWeight, const string& year, const std::unordered_set<string>& finalStateSet, const vector<FRSystSource>& frSourceVariants, const vector<WeightSystematic>& weightVariants, const vector<MetSystematic>& metVariants, unordered_map<string,TH1D*>& h_mZ1, unordered_map<string,TH1D*>& h_mZ2, unordered_map<string,TH1D*>& h_mH1, unordered_map<string,TH1D*>& h_mH2, unordered_map<string,TH1D*>& h_zPt, unordered_map<string,TH1D*>& h_met, unordered_map<string,TH1D*>& h_metphi, unordered_map<string,TH1D*>& h_LT, unordered_map<string,TH1D*> h_pt[NlepMax], unordered_map<string,TH1D*> h_eta[NlepMax], unordered_map<string,TH1D*> h_phi[NlepMax], unordered_map<string,TH1D*> h_d0[NlepMax], unordered_map<string,TH1D*> h_dZ[NlepMax], unordered_map<string,TH1D*> h_iso[NlepMax], const vector<Obj>& baseObjectsRoccorUp, const vector<Obj>& baseObjectsRoccorDown, bool hasRoccorVariation, const vector<TauCand>& tauCandsTauESUp, const vector<TauCand>& tauCandsTauESDown, const vector<Obj>& baseObjectsTauESUp, const vector<Obj>& baseObjectsTauESDown, bool hasTauESVariation)
 {
     const int nCand = tauCands.size();
     const int nBase = baseObjects.size();
@@ -409,6 +575,8 @@ void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand
         vector<Obj> cfg = baseObjects;
         vector<Obj> cfgRoccorUp = baseObjectsRoccorUp;
         vector<Obj> cfgRoccorDown = baseObjectsRoccorDown;
+        vector<Obj> cfgTauESUp = baseObjectsTauESUp;
+        vector<Obj> cfgTauESDown = baseObjectsTauESDown;
         for (int i = 0; i < nCand; ++i) {
             double f = tauCands[i].fr;
             double errF = tauCands[i].frErr;
@@ -419,6 +587,8 @@ void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand
                 cfg.push_back(tauCands[i]);
                 cfgRoccorUp.push_back(tauCands[i]);
                 cfgRoccorDown.push_back(tauCands[i]);
+                cfgTauESUp.push_back(tauCandsTauESUp[i]);
+                cfgTauESDown.push_back(tauCandsTauESDown[i]);
             }
             else {
                 factor = 1.0 - f;
@@ -433,6 +603,10 @@ void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand
         if (hasRoccorVariation) {
             std::stable_sort(cfgRoccorUp.begin(), cfgRoccorUp.end(), [](const Obj& a, const Obj& b) { return a.objectOrder < b.objectOrder; });
             std::stable_sort(cfgRoccorDown.begin(), cfgRoccorDown.end(), [](const Obj& a, const Obj& b) { return a.objectOrder < b.objectOrder; });
+        }
+        if (hasTauESVariation) {
+            std::stable_sort(cfgTauESUp.begin(), cfgTauESUp.end(), [](const Obj& a, const Obj& b) { return a.objectOrder < b.objectOrder; });
+            std::stable_sort(cfgTauESDown.begin(), cfgTauESDown.end(), [](const Obj& a, const Obj& b) { return a.objectOrder < b.objectOrder; });
         }
         if (wFR <= 0.0) continue;
         const double relErrTotal = std::sqrt(relVarSum);
@@ -449,6 +623,10 @@ void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand
             fillConfiguration(cfgRoccorUp, w, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_roccorUp");
             fillConfiguration(cfgRoccorDown, w, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_roccorDown");
         }
+        if (hasTauESVariation) {
+            fillConfiguration(cfgTauESUp, w, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_tauESUp");
+            fillConfiguration(cfgTauESDown, w, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_tauESDown");
+        }
         for (const auto& source : frSourceVariants) {
             double wFRSource = 1.0;
             for (int i = 0; i < nCand; ++i) {
@@ -458,7 +636,7 @@ void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand
                     source.reader->get(tauCands[i].pt, tauCands[i].eta, altF, altErr);
                     f = altF;
                 } else {
-                    f = tauCands[i].fr;
+                    f = tauCands[i].fr; // this source's alternate map wasn't derived for this candidate's fake source; keep it at nominal
                 }
                 wFRSource *= (mask & (1 << i)) ? f : (1.0 - f);
             }
@@ -469,6 +647,10 @@ void generateAndFillConfigs(const vector<Obj>& baseObjects, const vector<TauCand
         for (const auto& variant : weightVariants) {
             const double wVariant = variant.weight * wFR * objectSF;
             fillConfiguration(cfg, wVariant, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, variant.suffix);
+        }
+        for (const auto& sfVar : computeConfigurationObjectSFSystematics(cfg, year)) {
+            const double wSF = evtWeight * wFR * sfVar.objectSF;
+            fillConfiguration(cfg, wSF, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, sfVar.suffix);
         }
         for (const auto& metVar : metVariants) {
             double shiftedMet, shiftedMetPhi;
@@ -510,6 +692,11 @@ int ProcessTauFRFile(FileJob job) {
     if (!roccor) { fin->Close(); return 7; }
     enableBranchesTauFR(tree, isData);
     MyBranch(tree);
+    if (!isData && !tree->GetBranch("IDSF_Up_1")) {
+        std::cerr << "  [skip] MC file lacks precomputed SF Up/Down branches: " << job.fileName << std::endl;
+        fin->Close();
+        return 8;
+    }
     tree->SetCacheSize(200 * 1024 * 1024);
     tree->AddBranchToCache("*", kTRUE);
     std::shared_ptr<TauFRReader> frReader;
@@ -545,14 +732,22 @@ int ProcessTauFRFile(FileJob job) {
     if (!hNWEvts) hNWEvts = (TH1D*)fin->Get("hNEvts");
     double denom = hNWEvts ? hNWEvts->Integral() : 0.0;
     double xsw = (!isData && denom > 0.0) ? job.lumi * XSec(baseName) / denom : 1.0;
-    TString outName = Form("%s/hist_%s", job.outDir.c_str(), baseName.c_str());
+    Long64_t nEnt = tree->GetEntriesFast();
+    const bool isChunked = job.startEntry >= 0 && job.endEntry >= 0;
+    const Long64_t loopStart = isChunked ? job.startEntry : 0;
+    const Long64_t loopEnd = isChunked ? std::min(job.endEntry, nEnt) : nEnt;
+    std::string stem = baseName;
+    const size_t dotRoot = stem.rfind(".root");
+    if (dotRoot != std::string::npos) stem = stem.substr(0, dotRoot);
+    TString outName = isChunked
+        ? Form("%s/hist_%s_chunk%d.root", job.outDir.c_str(), stem.c_str(), job.chunkIndex)
+        : Form("%s/hist_%s", job.outDir.c_str(), baseName.c_str());
     TFile* fout = new TFile(outName, "RECREATE");
     fout->SetCompressionSettings(ROOT::CompressionSettings(ROOT::kZSTD, 1));
     if (hNWEvts) hNWEvts->Write();
     unordered_map<string,TH1D*> h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT;
     unordered_map<string,TH1D*> h_pt[NlepMax], h_eta[NlepMax], h_phi[NlepMax], h_d0[NlepMax], h_dZ[NlepMax], h_iso[NlepMax];
     std::unordered_set<string> finalStateSet(finalStates.begin(), finalStates.end());
-    Long64_t nEnt = tree->GetEntriesFast();
     std::cout << "  entries in tree: " << nEnt << std::endl;
     Long64_t nPassInput = 0;
     Long64_t nFilledSeed = 0;
@@ -562,25 +757,21 @@ int ProcessTauFRFile(FileJob job) {
     Long64_t nRecoilCorrected = 0;
     Long64_t nRecoilNoCandidate = 0;
     Long64_t nRecoilInvalid = 0;
-    for (Long64_t i = 0; i < nEnt; ++i) {
+    for (Long64_t i = loopStart; i < loopEnd; ++i) {
         tree->GetEntry(i);
-        if (i > 0 && i % 10000000 == 0) std::cout << "    processed " << i << " / " << nEnt << std::endl;
+        if (i > loopStart && (i - loopStart) % 10000000 == 0) std::cout << "    processed " << (i - loopStart) << " / " << (loopEnd - loopStart) << std::endl;
         string originalCat = numberToCat(cat);
         if (originalCat.size() > 4) continue;
         if (isData && originalCat.empty()) continue;
         applyTauES(originalCat);
         double roccorRelErr[4] = {0.0, 0.0, 0.0, 0.0};
         applyRoccoRCorrection(originalCat, isData, *roccor, roccorRelErr);
-        const double rawMetPx = met * std::cos(metphi);
-        const double rawMetPy = met * std::sin(metphi);
+        // No dedicated systematic is derived from the official MET-xy
+        // correction: the JME POG's own correctionlib payload for it
+        // ships only nominal pt/phi outputs, no up/down/syst nodes --
+        // unlike JES/JER, which always ship a Total/Up/Down source when a
+        // systematic is intended. See DCH_tight.C for the full reasoning.
         if (APPLY_OFFICIAL_MET_CORRECTION && !applyOfficialMETCorrection(*metCorrections)) continue;
-        bool hasMetPhiVariation = false;
-        double metPhiDeltaPx = 0.0, metPhiDeltaPy = 0.0;
-        if (APPLY_OFFICIAL_MET_CORRECTION) {
-            metPhiDeltaPx = met * std::cos(metphi) - rawMetPx;
-            metPhiDeltaPy = met * std::sin(metphi) - rawMetPy;
-            hasMetPhiVariation = true;
-        }
         RecoilSystShift recoilShift;
         bool hasRecoilVariation = false;
         if (useRecoilCorrection) {
@@ -589,17 +780,8 @@ int ProcessTauFRFile(FileJob job) {
             double visPx = 0.0;
             double visPy = 0.0;
             bool hasCandidate = false;
-            if (isDY) {
-                hasCandidate = getPromptTruthDileptonXY(originalCat, genPx, genPy);
-                visPx = genPx;
-                visPy = genPy;
-            }
-            else if (isWJ) {
-                hasCandidate = getPromptTruthLeptonXY(originalCat, visPx, visPy);
-                if (hasCandidate) {
-                    genPx = visPx + met * std::cos(metphi);
-                    genPy = visPy + met * std::sin(metphi);
-                }
+            if (isDY || isWJ) {
+                hasCandidate = getGenBosonMomentum(genPx, genPy, visPx, visPy);
             }
             if (!hasCandidate) ++nRecoilNoCandidate;
             else if (!applyRecoilCorrection(*recoilCorrector, genPx, genPy, visPx, visPy)) ++nRecoilInvalid;
@@ -621,10 +803,17 @@ int ProcessTauFRFile(FileJob job) {
         if (job.year == "2018" && !isData && applyHEMveto(originalCat) == "yes") evtWeight *= 0.35;
         vector<WeightSystematic> weightVariants;
         if (APPLY_ZPT_REWEIGHTING && isDY) {
-            double promptTruthZPt = 0.0;
-            if (getPromptTruthDileptonPt(originalCat, promptTruthZPt)) {
+            GenZMatch genZ;
+            vector<std::pair<int,int>> zPtOSPair, zPtSSPair;
+            buildPairs(originalCat, zPtOSPair, zPtSSPair);
+            if (!zPtOSPair.empty()) {
+                const TLorentzVector lep1 = LepV(zPtOSPair[0].first);
+                const TLorentzVector lep2 = LepV(zPtOSPair[0].second);
+                genZ = matchGenZ(lep1.Pt(), lep1.Eta(), lep1.Phi(), lep2.Pt(), lep2.Eta(), lep2.Phi());
+            }
+            if (genZ.matched) {
                 double zPtWeight = 0.0, zPtWeightErr = 0.0;
-                if (!getZPtWeight(zPtWeights.get(), promptTruthZPt, zPtWeight, zPtWeightErr)) { ++nZPtInvalid; continue; }
+                if (!getZPtWeight(zPtWeights.get(), genZ.pt, zPtWeight, zPtWeightErr)) { ++nZPtInvalid; continue; }
                 evtWeight *= zPtWeight;
                 ++nZPtReweighted;
                 if (zPtWeight > 0.0) {
@@ -641,14 +830,16 @@ int ProcessTauFRFile(FileJob job) {
                 weightVariants.push_back({"_xsecUp", evtWeight * (1.0 + xsecUnc)});
                 weightVariants.push_back({"_xsecDown", evtWeight * std::max(0.0, 1.0 - xsecUnc)});
             }
+            const double trigSFNominal = computeTriggerSF(originalCat);
+            if (trigSFNominal > 0.0) {
+                const TrigSFShift trigShift = computeTriggerSFShifts(originalCat, job.year);
+                weightVariants.push_back({"_eTrigUp", evtWeight / trigSFNominal * trigShift.eUp});
+                weightVariants.push_back({"_eTrigDown", evtWeight / trigSFNominal * trigShift.eDown});
+                weightVariants.push_back({"_muTrigUp", evtWeight / trigSFNominal * trigShift.muUp});
+                weightVariants.push_back({"_muTrigDown", evtWeight / trigSFNominal * trigShift.muDown});
+            }
         }
         vector<MetSystematic> metVariants;
-        if (hasMetPhiVariation) {
-            const double finalPx = met * std::cos(metphi);
-            const double finalPy = met * std::sin(metphi);
-            metVariants.push_back({"_metPhiCorrUp", finalPx + metPhiDeltaPx, finalPy + metPhiDeltaPy});
-            metVariants.push_back({"_metPhiCorrDown", finalPx - metPhiDeltaPx, finalPy - metPhiDeltaPy});
-        }
         if (hasRecoilVariation) {
             metVariants.push_back({"_recoilResponseUp", recoilShift.responseUpPx, recoilShift.responseUpPy});
             metVariants.push_back({"_recoilResponseDown", recoilShift.responseDownPx, recoilShift.responseDownPy});
@@ -693,12 +884,19 @@ int ProcessTauFRFile(FileJob job) {
         ++nPassInput;
         vector<Obj> baseObjectsRoccorUp = baseObjects;
         vector<Obj> baseObjectsRoccorDown = baseObjects;
-        bool hasRoccorVariation = false;
+        // Gated on originalCat containing a muon (structural), NOT on
+        // whether roccorRelErr happens to be nonzero for one: each object's
+        // shift already no-ops safely when unavailable (loop below leaves
+        // its pt untouched), so gating the whole event's Up/Down fill on
+        // per-object availability would silently drop events with an
+        // unavailable/zero roccor error from the histograms entirely
+        // instead of including them unshifted -- the same bug found and
+        // fixed for TauES.
+        const bool hasRoccorVariation = originalCat.find('m') != string::npos;
         for (auto& o : baseObjectsRoccorUp) {
             if (o.flav != 'm' || o.tightIdx < 1 || o.tightIdx > 4) continue;
             const double delta = roccorRelErr[o.tightIdx - 1];
             if (delta <= 0.0) continue;
-            hasRoccorVariation = true;
             o.pt *= (1.0 + delta);
         }
         for (auto& o : baseObjectsRoccorDown) {
@@ -706,6 +904,40 @@ int ProcessTauFRFile(FileJob job) {
             const double delta = roccorRelErr[o.tightIdx - 1];
             if (delta <= 0.0) continue;
             o.pt *= std::max(0.0, 1.0 - delta);
+        }
+        double tauESRelUp[4], tauESRelDown[4];
+        computeTauESRelShift(originalCat, tauESRelUp, tauESRelDown);
+        // Gated on originalCat containing a tau (structural), NOT on
+        // whether a shift was actually available for it: shiftTauESPts-
+        // style per-slot application below already no-ops when relUp/
+        // relDown are 0 (e.g. the TauES_Up/Down sentinel case), so this
+        // correctly includes every tau-channel event in the Up/Down
+        // histograms -- shifted where available, unchanged where not --
+        // instead of the previous data-availability gate, which silently
+        // dropped an event from _tauESUp/_tauESDown entirely whenever its
+        // tau's decay-mode-aware shift was unavailable. That was
+        // collapsing tau-channel _tauESUp/_tauESDown histograms to
+        // near-zero relative to nominal.
+        const bool hasTauESVariation = originalCat.find('t') != string::npos;
+        vector<Obj> baseObjectsTauESUp = baseObjects;
+        vector<Obj> baseObjectsTauESDown = baseObjects;
+        for (auto& o : baseObjectsTauESUp) {
+            if (o.flav != 't' || o.tightIdx < 1 || o.tightIdx > 4) continue;
+            o.pt *= (1.0 + tauESRelUp[o.tightIdx - 1]);
+        }
+        for (auto& o : baseObjectsTauESDown) {
+            if (o.flav != 't' || o.tightIdx < 1 || o.tightIdx > 4) continue;
+            o.pt *= (1.0 + tauESRelDown[o.tightIdx - 1]);
+        }
+        vector<TauCand> tauCandsTauESUp = tauCands;
+        vector<TauCand> tauCandsTauESDown = tauCands;
+        for (auto& c : tauCandsTauESUp) {
+            if (!c.fromTight || c.tightIdx < 1 || c.tightIdx > 4) continue;
+            c.pt *= (1.0 + tauESRelUp[c.tightIdx - 1]);
+        }
+        for (auto& c : tauCandsTauESDown) {
+            if (!c.fromTight || c.tightIdx < 1 || c.tightIdx > 4) continue;
+            c.pt *= (1.0 + tauESRelDown[c.tightIdx - 1]);
         }
         if (isData || !APPLY_TAU_FAKE_RATE) {
             fillConfiguration(baseObjects, evtWeight, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso);
@@ -718,8 +950,12 @@ int ProcessTauFRFile(FileJob job) {
                 fillConfiguration(baseObjectsRoccorUp, evtWeight, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_roccorUp");
                 fillConfiguration(baseObjectsRoccorDown, evtWeight, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_roccorDown");
             }
+            if (hasTauESVariation) {
+                fillConfiguration(baseObjectsTauESUp, evtWeight, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_tauESUp");
+                fillConfiguration(baseObjectsTauESDown, evtWeight, finalStateSet, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, "_tauESDown");
+            }
         }
-        else generateAndFillConfigs(baseObjects, tauCands, evtWeight, finalStateSet, frSystReaders, weightVariants, metVariants, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, baseObjectsRoccorUp, baseObjectsRoccorDown, hasRoccorVariation);
+        else generateAndFillConfigs(baseObjects, tauCands, evtWeight, job.year, finalStateSet, frSystReaders, weightVariants, metVariants, h_mZ1, h_mZ2, h_mH1, h_mH2, h_zPt, h_met, h_metphi, h_LT, h_pt, h_eta, h_phi, h_d0, h_dZ, h_iso, baseObjectsRoccorUp, baseObjectsRoccorDown, hasRoccorVariation, tauCandsTauESUp, tauCandsTauESDown, baseObjectsTauESUp, baseObjectsTauESDown, hasTauESVariation);
         ++nFilledSeed;
     }
     fout->cd();
@@ -754,7 +990,7 @@ int ProcessTauFRFile(FileJob job) {
 
 void DCH_tauFR(string inYear="2018", int firstFile=0, int nFilesToRun=-1, int nProc=1, string processFilter="")
 {
-    TString outDirBase = "hists/run2_hists_tauFR_etau_roccor";
+    TString outDirBase = "/eos/user/a/atahmad/DCH_offline_analysis/hists/run2_hists_tauFR_etau_roccor";
     TString outDir = Form("%s/%s", outDirBase.Data(), inYear.c_str());
     gSystem->mkdir(outDir, kTRUE);
     std::map<string, vector<string>> fileMap = getFileMap(inYear);
@@ -788,4 +1024,32 @@ void DCH_tauFR(string inYear="2018", int firstFile=0, int nFilesToRun=-1, int nP
         auto results = pool.Map(ProcessTauFRFile, jobs);
         (void)results;
     }
+}
+
+// Processes exactly one 1M-event chunk of one (year, file-index) file,
+// mirroring the one-job-per-file condor convention. Chunk outputs are
+// staged in a chunks/ subdirectory and are meant to be combined back into
+// hist_<sample>.root by MergeChunkHists.C before Stackhist.C sees them.
+void DCH_tauFR_Chunk(string inYear="2018", int idx=0, int chunkIdx=0)
+{
+    TString outDir = Form("/eos/user/a/atahmad/DCH_offline_analysis/hists/chunks/run2_hists_tauFR_etau_roccor/%s", inYear.c_str());
+    gSystem->mkdir(outDir, kTRUE);
+    std::map<string, vector<string>> fileMap = getFileMap(inYear);
+    vector<std::pair<string,string>> files;
+    for (const auto& item : fileMap)
+        for (const auto& fName : item.second) files.push_back({item.first, fName});
+    if (idx < 0 || idx >= (int)files.size()) { std::cerr << "ERROR: invalid idx=" << idx << ", number of files=" << files.size() << std::endl; return; }
+    double lumi = (inYear=="2016preVFP") ? 19520.0 : (inYear=="2016postVFP") ? 16810.0 : (inYear=="2017") ? 41480.0 : (inYear=="2018") ? 59830.0 : 19520.0 + 16810.0 + 41480.0 + 59830.0;
+    FileJob job;
+    job.year = inYear;
+    job.process = files[idx].first;
+    job.fileName = files[idx].second;
+    job.outDir = outDir.Data();
+    job.lumi = lumi;
+    job.index = idx;
+    job.total = (int)files.size();
+    job.startEntry = static_cast<Long64_t>(chunkIdx) * CHUNK_SIZE;
+    job.endEntry = job.startEntry + CHUNK_SIZE;
+    job.chunkIndex = chunkIdx;
+    ProcessTauFRFile(job);
 }

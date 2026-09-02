@@ -6,9 +6,8 @@
 #include <map>
 
 const std::string MCBASE   = "root://cmseos.fnal.gov//store/user/aahmad2/run2_files/run2_skims";
-const std::string DATABASE = "root://cmseos.fnal.gov//store/user/aahmad2/run2_files/run2_skims_data_updated_lumi";
-
-const std::string SIGNALBASE = "root://cmseos.fnal.gov//store/user/aahmad2/run2_files/run2_signal";
+const std::string DATABASE = "root://cmseos.fnal.gov//store/user/aahmad2/run2_files/run2_skims";
+const std::string SIGNALBASE = "root://cmseos.fnal.gov//store/user/aahmad2/run2_files/run2_skims";
 
 inline std::string mcPath(const std::string& year, const std::string& f) {
     return MCBASE + "/MC_" + year + "/" + f;

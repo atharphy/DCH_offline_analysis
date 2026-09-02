@@ -1,10 +1,10 @@
 # DCH Offline Analysis
 
-CMS Run 2 offline analysis framework for a di-Higgs / multi-lepton (electron, muon, hadronic tau)
-search. This repository contains the event-selection and histogramming stage (`DCH_tauFR.C`,
-`DCH_tight.C`), the jet-fake-rate estimation used by the loose-to-tight (fake-factor) method, the
-correction/systematic modules applied to both data and simulation, and the plotting stage
-(stacked-histogram and yield-table production).
+CMS Run 2 offline analysis framework for a Double Charged Higgs decaying into multilepton final
+states (electron, muon, hadronic tau) search. This repository contains the event-selection and
+histogramming stage (`DCH_tauFR.C`, `DCH_tight.C`), the jet-fake-rate estimation used by the
+loose-to-tight (fake-factor) method, the correction/systematic modules applied to both data and
+simulation, and the plotting stage (stacked-histogram and yield-table production).
 
 It is a curated copy of a larger working area: only the scripts, modules, and result files actually
 needed to run the two main event-selection macros and the plotting scripts are included. Comments
@@ -28,6 +28,11 @@ have been stripped from all `.C`/`.h` files; this README is the documentation in
 ```
 DCH_tauFR.C, DCH_tight.C          event selection + histogram production (loose-tau-fake-rate
                                    and tight-baseline variants of the same analysis)
+DCH_tauFR_SF.C                    DCH_tauFR.C variant that applies the jet->tau fake rate as a
+                                   data/MC scale factor (Dependencies/fake_rates/tau_fake_rates/
+                                   DY_tau_fake_rate_SF_2D.root) instead of the fake-factor reweight
+MergeChunkHists.C                 merges per-chunk histogram output from the condor chunking mode
+                                   (see batch/*_chunk.sub) back into one file per year
 Stackhist.C                       stacked background/data comparison plots
 Stackhist_multiplicity.C          same, split by lepton/jet multiplicity
 YieldPlots.C                      per-category event-yield tables and bar charts
@@ -50,7 +55,14 @@ roccor/                           CMS RoccoR muon momentum scale/smearing correc
                                    calibration tables)
 HTT-utilities/RecoilCorrections/  CMS-HTT MET recoil-correction and MET-systematics classes,
                                    bundled with our re-derived recoil calibration payloads
-batch/                            HTCondor submission files for all five scripts above
+batch/                            HTCondor submission files for all scripts above, including the
+                                   chunked (per-file-split) DCH_tauFR.C/DCH_tight.C submission mode
+systematics_plots/                standalone plotting suite for lepton/tau ID+iso/trigger SF maps,
+                                   RoccoR, tau ES, and Z pT weights -- not read by DCH_tauFR.C/
+                                   DCH_tight.C, run independently to produce review plots
+sf_uncertainty/                   cross-check tool (TestSFUncertainty.C) comparing the on-the-fly
+                                   correctionlib SF-uncertainty recompute against precomputed skim
+                                   branches, plus the correctionlib JSONs/ROOT files it reads
 
 derivation_scripts/                scripts that produced everything under Dependencies/ (kept
                                     separate from the main pipeline: none of these are called by
@@ -62,11 +74,23 @@ derivation_scripts/                scripts that produced everything under Depend
   tau_fr_systematics/              jet->tau fake-rate systematic-variation histograms
   recoil_corrections/              re-derivation of the HTT-utilities recoil payload
   zpt_reweighting/                 Z pT reweighting derivation
+  qcd_fake_rates/                  jet->electron/muon/tau fake-rate measurement from a QCD-enriched
+                                    control region (Tight-Loose matrix method, AN-19-111/X53-AN2016
+                                    style). Not yet wired into DCH_tauFR.C/DCH_tight.C -- see note
+                                    below. The condor skim producer itself (qcd_fakerate_skim.py,
+                                    gen_fakerate_skims.py) lives in the skim-production repo, not
+                                    here, and reads directly from NanoAOD rather than from anything
+                                    in this repository.
 
 Dependencies/                      result files read at runtime by DCH_tauFR.C/DCH_tight.C
   fake_rates/tau_fake_rates/       jet->tau fake rate: the final 2D pT/|eta| histogram DCH_tauFR.C
                                     reads, plus rates/ (the 6 per-process inputs
-                                    tau_fr_systematics/FakeRateSources.h consolidates)
+                                    tau_fr_systematics/FakeRateSources.h consolidates), plus
+                                    DY_tau_fake_rate_SF_2D.root (DCH_tauFR_SF.C's SF variant)
+  fake_rates/qcd_fake_rates/       QCD-region-derived jet->e/mu/tau fake-rate histograms (per year,
+                                    per flavor, per Data/MC category) from derivation_scripts/
+                                    qcd_fake_rates/BuildQCDFakeRates.C -- not yet read by any
+                                    driver script, kept here for review/iteration
   etau_fake_rates/cut_results/     electron->tau fake rate
   systematics/results/             jet->tau fake-rate systematic variations (5 sources x 4 years
                                     + Run2 combination each)
@@ -82,11 +106,19 @@ Dependencies/                      result files read at runtime by DCH_tauFR.C/D
   `DY_data_tau_fake_rate_2D.root` that `DCH_tauFR.C` actually reads. If that measurement needs to
   be redone from scratch, it was not a clean, single-script pipeline in the source area this was
   copied from.
-- The newer jet->electron / jet->muon / jet->tau fake-rate measurement (a separate, still-unwired,
-  still-being-validated effort) is intentionally excluded. It is not read by `DCH_tauFR.C` or
-  `DCH_tight.C` and is not part of this analysis yet.
+- The jet->electron / jet->muon / jet->tau QCD-region fake-rate measurement
+  (`derivation_scripts/qcd_fake_rates/`, `Dependencies/fake_rates/qcd_fake_rates/`) is included as
+  of this update, but is still a standalone, still-being-validated effort: it is not read by
+  `DCH_tauFR.C` or `DCH_tight.C` at runtime yet. The ~10k-job condor skim that feeds it
+  (`qcd_fakerate_skim.py`/`gen_fakerate_skims.py`) is also not included here -- it lives in the
+  skim-production repository and reads NanoAOD directly, producing the per-year/per-sample skims
+  that `derivation_scripts/qcd_fake_rates/merge_qcd_fakerate_skims.py` then merges and
+  `BuildQCDFakeRates.C` turns into the fake-rate histograms checked in here.
 - `stacking_scripts/` (an older, pre-refactor version of the stacking code that does not use
   `Stack_modules/`) was left out in favor of the current `Stackhist.C` / `Stackhist_multiplicity.C`.
+- A stray pre-edit backup snapshot of `DCH_tauFR.C`/`DCH_tight.C` (predating the chunking support
+  and the precomputed-SF-branch reads) was found alongside the working area and left out as stale
+  scratch, not a real dependency.
 
 ## Prerequisites
 

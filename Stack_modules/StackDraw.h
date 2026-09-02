@@ -47,44 +47,61 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
                 TH1D* h = fetchAndClone(f, sourceName);
                 if (h) {
                     if (!gh.nominal) {
-                        gh.nominal = h;
-                        gh.nominal->SetName((grp + "_" + hname).c_str());
-                        h = nullptr;
+                        gh.nominal = (TH1D*)h->Clone((grp + "_" + hname).c_str());
+                        gh.nominal->SetDirectory(nullptr);
                     } else {
                         gh.nominal->Add(h);
                     }
-                    delete h;
                 }
 
-                if (!DRAW_BANDS) continue;
-
-                for (const auto& sys : activeSources) {
-                    TH1D* hup = fetchAndClone(f, sourceName + sys.upSuffix);
-                    if (hup) {
-                        TH1D*& acc = gh.up[sys.name];
-                        if (!acc) {
-                            acc = hup;
-                            acc->SetName((grp + "_" + hname + "_" + sys.name + "Up").c_str());
-                            hup = nullptr;
-                        } else {
-                            acc->Add(hup);
+                if (DRAW_BANDS) {
+                    for (const auto& sys : activeSources) {
+                        // Fall back to this source's own nominal (h) when
+                        // its specific systematic variant doesn't exist
+                        // (e.g. a muon-only source like roccor for a
+                        // channel with no muon in it). Treating a missing
+                        // variant as "omit this source from the sum"
+                        // instead of "no shift for this source" silently
+                        // drops that source's yield from the group's
+                        // up/down total while it stays fully present in
+                        // the nominal total -- harmless for a single-
+                        // source group (drawAndSay's caller, Stackhist.C),
+                        // where bandErrorAt's own group-level fallback
+                        // already covers "no variant at all", but wrong as
+                        // soon as a group sums multiple sourceNames and
+                        // only some of them have the variant (exactly
+                        // Stackhist_multiplicity.C's per-region sum across
+                        // every final state), where it inflated the band.
+                        TH1D* hup = fetchAndClone(f, sourceName + sys.upSuffix);
+                        if (!hup && h) hup = (TH1D*)h->Clone();
+                        if (hup) {
+                            TH1D*& acc = gh.up[sys.name];
+                            if (!acc) {
+                                acc = hup;
+                                acc->SetName((grp + "_" + hname + "_" + sys.name + "Up").c_str());
+                                hup = nullptr;
+                            } else {
+                                acc->Add(hup);
+                            }
+                            delete hup;
                         }
-                        delete hup;
-                    }
 
-                    TH1D* hdn = fetchAndClone(f, sourceName + sys.downSuffix);
-                    if (hdn) {
-                        TH1D*& acc = gh.down[sys.name];
-                        if (!acc) {
-                            acc = hdn;
-                            acc->SetName((grp + "_" + hname + "_" + sys.name + "Down").c_str());
-                            hdn = nullptr;
-                        } else {
-                            acc->Add(hdn);
+                        TH1D* hdn = fetchAndClone(f, sourceName + sys.downSuffix);
+                        if (!hdn && h) hdn = (TH1D*)h->Clone();
+                        if (hdn) {
+                            TH1D*& acc = gh.down[sys.name];
+                            if (!acc) {
+                                acc = hdn;
+                                acc->SetName((grp + "_" + hname + "_" + sys.name + "Down").c_str());
+                                hdn = nullptr;
+                            } else {
+                                acc->Add(hdn);
+                            }
+                            delete hdn;
                         }
-                        delete hdn;
                     }
                 }
+                delete h;
             }
         }
 
@@ -108,6 +125,8 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
         for (auto& d : G[grp].down) d.second->Scale(factor);
     };
 
+    // Per-year scale factors derived by roofit_zz.C/roofit_wz.C, read from the
+    // offline/-local CSV copies they keep updated (year -> scale_factor).
     auto readSFFromCSV = [](const std::string& csvPath) {
         static std::map<std::string, std::map<std::string, double>> cache;
         auto& yearMap = cache[csvPath];
@@ -115,7 +134,7 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
             std::ifstream fin(csvPath);
             std::string line;
             if (fin) {
-                std::getline(fin, line);
+                std::getline(fin, line); // header
                 while (std::getline(fin, line)) {
                     size_t p1 = line.find(',');
                     size_t p2 = line.find(',', p1 == std::string::npos ? p1 : p1 + 1);
@@ -221,7 +240,10 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
     }
 
     double ymax = h_bkg->GetMaximum();
-    if (G.count("data")) ymax = std::max(ymax, G["data"].nominal->GetMaximum());
+    // Excluded when blind: the axis range must not leak the data yield even
+    // when the points themselves aren't drawn (a data spike would otherwise
+    // still show up as extra headroom on an otherwise-background-only plot).
+    if (!blind && G.count("data")) ymax = std::max(ymax, G["data"].nominal->GetMaximum());
 
     if (ymax <= 0.0) {
         std::cout << "[skip empty] " << hname << std::endl;
@@ -244,15 +266,23 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
         for (const auto& sys : activeSources) {
             double up = h_bkg_up_by_source.count(sys.name) ? h_bkg_up_by_source[sys.name]->GetBinContent(ib) : nom;
             double down = h_bkg_down_by_source.count(sys.name) ? h_bkg_down_by_source[sys.name]->GetBinContent(ib) : nom;
-            if (up < nom) up = nom;
-            if (down > nom) down = nom;
             if (down < 0.0) down = 0.0;
-            const double devHigh = up - nom;
-            const double devLow = nom - down;
+            // Envelope, not a naive up-is-high/down-is-low split: shape
+            // systematics can legitimately "cross over" in a given bin (both
+            // variants move the same direction, e.g. near a distribution
+            // edge). Taking max(.., 0) on each side keeps whichever variant
+            // actually deviates furthest instead of silently discarding a
+            // source's contribution when it doesn't move the expected way.
+            const double devHigh = std::max({up - nom, down - nom, 0.0});
+            const double devLow = std::max({nom - up, nom - down, 0.0});
             sumSqHigh += devHigh * devHigh;
             sumSqLow += devLow * devLow;
         }
-        return std::make_pair(std::sqrt(sumSqLow), std::sqrt(sumSqHigh));
+        // Displayed band is symmetrized: take the larger of the two envelope
+        // sides and use it on both directions, so the drawn band never
+        // underestimates either side while staying visually symmetric.
+        const double symErr = std::sqrt(std::max(sumSqLow, sumSqHigh));
+        return std::make_pair(symErr, symErr);
     };
 
     TGraphAsymmErrors* g_unc_band = nullptr;
@@ -312,7 +342,7 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
     st->GetYaxis()->SetTitleSize(0.052);
     st->GetYaxis()->SetTitleOffset(1.5);
     st->GetYaxis()->SetLabelSize(0.045);
-
+    // x-axis is drawn on the ratio pad below instead (left blank when there's no data)
     st->GetXaxis()->SetTitle("");
     st->GetXaxis()->SetLabelSize(0.0);
     st->GetXaxis()->SetTitleSize(0.0);
@@ -375,6 +405,9 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
     {
         p2->cd();
 
+        // Axis-only frame, always drawn: this is what gives the ratio pad its
+        // "Ratio"/"Data/Simulation" title, [0,2] range and gridlines even when
+        // there's no data to actually plot a ratio for (blinded SR).
         ratioFrame = (TH1D*)h_bkg->Clone(("ratioframe_" + hname).c_str());
         ratioFrame->SetDirectory(nullptr);
         ratioFrame->Reset();
@@ -390,9 +423,14 @@ inline void drawAndSave(const std::string& hname, const std::vector<std::string>
         ratioFrame->GetXaxis()->SetLabelSize(0.09);
         ratioFrame->SetMinimum(0.0);
         ratioFrame->SetMaximum(2.0);
-
+        // Plain draw (not "AXIS") so the pad's grid-painting step actually
+        // runs -- "AXIS"-only is a lightweight TH1::Paint() path that skips
+        // it. ratioFrame has zero content everywhere (Reset() above), so
+        // this just traces a flat line along the x-axis baseline.
         ratioFrame->Draw("");
 
+        // MC stat+syst band around 1.0 -- depends only on h_bkg/activeSources,
+        // never on data, so it's safe to draw even when blinded.
         if (DRAW_BANDS) {
             g_ratio_band = new TGraphAsymmErrors(h_bkg->GetNbinsX());
             for (int ib = 1; ib <= h_bkg->GetNbinsX(); ++ib) {

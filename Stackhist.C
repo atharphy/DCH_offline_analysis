@@ -1,3 +1,22 @@
+// Stackhist.C
+//
+// Stacked-histogram plotter. Reads whatever "hist_*.root" files exist under
+// INPUT_DIR (per-year subfolders, same layout the DCH scripts write to) and
+// writes plots under OUTPUT_DIR. Produces one plot per (variable, channel,
+// region), discovered directly from the histogram keys actually present.
+//
+// Run:
+//   root -l -b -q 'Stackhist.C+("2018")'
+//
+// Edit INPUT_DIR / OUTPUT_DIR / DRAW_BANDS / USE_LOG_Y / EVENTS_PER_BIN_WIDTH
+// below and recompile to change what is read, where plots go, or how they
+// are drawn.
+//
+// Arguments:
+//   inYear          = year, or "2016"/"Run2" for combined periods
+//   firstVariable   = first variable index
+//   nVariablesToRun = number of variables, -1 means all remaining variables
+
 #include <TROOT.h>
 #include <TFile.h>
 #include <TH1D.h>
@@ -22,8 +41,8 @@ static bool DRAW_BANDS = true;
 static bool USE_LOG_Y = false;
 static bool EVENTS_PER_BIN_WIDTH = false;
 static bool blind_SR = true;
-static std::string INPUT_DIR = "hists/run2_hists_tauFR_etau_roccor/";
-static std::string OUTPUT_DIR = "plots/run2_plots_tauFR_etau_roccor/";
+static std::string INPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_hists/run2_noFR_metphi_zpt_recoil_roccor_v2/";
+static std::string OUTPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_plots/run2_noFR_metphi_zpt_recoil_roccor_v2/";
 
 #include "Stack_modules/Labels.h"
 #include "Stack_modules/HistCache.h"
@@ -111,7 +130,7 @@ void Stackhist(std::string inYear = "2018", int firstVariable = 0, int nVariable
             previousVariable = var;
         }
         const bool isSR = hname.find("_SR_") != std::string::npos;
-        drawAndSave(hname, {hname}, handles, fill_colors, outdir, useLog, kAllSystSources, true, isSR && blind_SR);
+        drawAndSave(hname, {hname}, handles, fill_colors, outdir, useLog, kAllSystSources, true, /*blind=*/isSR && blind_SR);
     }
 
     for (auto& processEntry : handles) {

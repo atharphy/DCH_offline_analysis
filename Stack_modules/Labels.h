@@ -8,6 +8,7 @@
 #include "TLatex.h"
 
 #include "StackConfig.h"
+#include "SystematicSources.h"
 
 inline std::string getVariableFromHname(const std::string& hname) {
     std::vector<std::string> vars = allVariables;
@@ -20,11 +21,23 @@ inline std::string getVariableFromHname(const std::string& hname) {
 }
 
 inline std::string getRegionGroupFromHname(const std::string& hname) {
+    // Systematic-variant histograms have their up/down suffix appended after
+    // the region (e.g. "h_zPt_mmt_SR_3lep1tau_zptUp"), so the region is no
+    // longer the literal end of the string -- strip a known suffix first, or
+    // this falls through to the unkeyed global binning entry instead of the
+    // region-specific override (silently produces a different bin scheme
+    // than the nominal histogram, which THStack/TH1::Merge then rejects).
+    std::string base = hname;
+    for (const auto& src : kAllKnownSystSources) {
+        if (endsWith(base, src.upSuffix)) { base = base.substr(0, base.size() - src.upSuffix.size()); break; }
+        if (endsWith(base, src.downSuffix)) { base = base.substr(0, base.size() - src.downSuffix.size()); break; }
+    }
+
     std::vector<std::string> regs = regions;
     std::sort(regs.begin(), regs.end(), [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
     for (const auto& reg : regs) {
         const std::string suffix = "_" + reg;
-        if (hname.size() >= suffix.size() && hname.compare(hname.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        if (base.size() >= suffix.size() && base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0) {
             const size_t us = reg.find('_');
             return us == std::string::npos ? reg : reg.substr(0, us);
         }

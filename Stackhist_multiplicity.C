@@ -1,3 +1,22 @@
+// Stackhist_multiplicity.C
+//
+// Stacked-histogram plotter for tau-multiplicity plots (summed over all final
+// states, split only by variable and CR/VR/SR region). Reads whatever
+// "hist_*.root" files exist under INPUT_DIR (per-year subfolders, same layout
+// the DCH scripts write to) and writes plots under OUTPUT_DIR.
+//
+// Run:
+//   root -l -b -q 'Stackhist_multiplicity.C+("2018")'
+//
+// Edit INPUT_DIR / OUTPUT_DIR / DRAW_BANDS / USE_LOG_Y / EVENTS_PER_BIN_WIDTH
+// below and recompile to change what is read, where plots go, or how they
+// are drawn.
+//
+// Arguments:
+//   inYear          = year, or "2016"/"Run2" for combined periods
+//   firstVariable   = first variable index
+//   nVariablesToRun = number of variables, -1 means all remaining variables
+
 #include <TROOT.h>
 #include <TFile.h>
 #include <TH1D.h>
@@ -20,8 +39,9 @@
 static bool DRAW_BANDS = true;
 static bool USE_LOG_Y = false;
 static bool EVENTS_PER_BIN_WIDTH = false;
-static std::string INPUT_DIR = "hists/run2_hists_noFR_roccor/";
-static std::string OUTPUT_DIR = "multiplicity_plots/run2_plots_noFR_roccor/";
+static bool blind_SR = true;
+static std::string INPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_hists/run2_noFR_metphi_zpt_recoil_roccor_v2/";
+static std::string OUTPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_mult_plots/run2_noFR_metphi_zpt_recoil_roccor_v2/";
 
 #include "Stack_modules/Labels.h"
 #include "Stack_modules/HistCache.h"
@@ -98,7 +118,8 @@ void Stackhist_multiplicity(std::string inYear = "2018", int firstVariable = 0, 
             for (const auto& ch : finalStates) sourceNames.push_back("h_" + var + "_" + ch + "_" + reg);
 
             const std::string hname = "h_" + var + "_" + reg;
-            drawAndSave(hname, sourceNames, handles, fill_colors, outdir, useLog, kAllSystSources, false);
+            const bool isSR = hname.find("_SR_") != std::string::npos;
+            drawAndSave(hname, sourceNames, handles, fill_colors, outdir, useLog, kAllSystSources, false, /*blind=*/isSR && blind_SR);
         }
 
         CleanUpROOTMemory();

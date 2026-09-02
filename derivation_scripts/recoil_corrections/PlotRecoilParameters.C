@@ -16,7 +16,8 @@
 
 namespace {
 
-const std::string kInputBase = "output";
+const std::string kInputBase =
+    "/eos/user/a/atahmad/DCH_offline_analysis/recoil_studies";
 
 const std::vector<std::string> kYears = {
     "2016preVFP", "2016postVFP", "2017", "2018"

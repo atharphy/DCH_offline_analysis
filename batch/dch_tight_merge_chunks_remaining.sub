@@ -1,0 +1,13 @@
+executable     = run_dch_merge_chunks.sh
+arguments      = /eos/user/a/atahmad/DCH_offline_analysis/new_hists/chunks/run2_noFR_metphi_zpt_recoil_roccor /eos/user/a/atahmad/DCH_offline_analysis/new_hists/run2_noFR_metphi_zpt_recoil_roccor $(year)
+output         = logs/dch_tight_merge_$(year).out
+error          = logs/dch_tight_merge_$(year).err
+log            = logs/dch_tight_merge_$(year).log
+request_cpus   = 1
+request_memory = 2000
+request_disk   = 2000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = /afs/cern.ch/user/a/atahmad/.grid_proxy/x509up.pem
+
+queue year in (2016preVFP, 2017, 2018)

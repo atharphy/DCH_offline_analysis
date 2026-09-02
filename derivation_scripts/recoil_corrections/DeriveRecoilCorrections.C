@@ -25,13 +25,14 @@ R__LOAD_LIBRARY(libcorrectionlib.so)
 #include <string>
 #include <vector>
 
-#include "../../filemap/FileMap.h"
-#include "../../include/Xsections.C"
+#include "../filemap/FileMap.h"
+#include "../include/Xsections.C"
 
 namespace {
 
 const bool APPLY_ZPT_REWEIGHTING = true;
-const std::string OUTPUT_BASE = "output";
+const std::string OUTPUT_BASE =
+    "/eos/user/a/atahmad/DCH_offline_analysis/recoil_studies";
 
 const std::vector<double> ZPT_EDGES = {
     0., 10., 20., 30., 50., 1000.
@@ -82,9 +83,11 @@ struct Branches {
     Double_t phi[2] = {};
     Double_t mass[2] = {};
     Double_t charge[2] = {};
-    Int_t genPartFlav[2] = {};
-    Double_t truthPt[2] = {};
-    Double_t truthPhi[2] = {};
+    std::vector<double>* genPartPt = nullptr;
+    std::vector<double>* genPartPhi = nullptr;
+    std::vector<int>* genPartPdgId = nullptr;
+    std::vector<int>* genPartStatus = nullptr;
+    std::vector<int>* genPartStatusFlags = nullptr;
     Double_t idSF[2] = {1.0, 1.0};
     Double_t isoSF[2] = {1.0, 1.0};
     Double_t trigSF[2] = {1.0, 1.0};
@@ -135,6 +138,54 @@ std::string categoryString(Int_t category) {
     if (category == 40) return "ee";
     if (category == 43) return "mm";
     return "";
+}
+
+// Follows the CMS-HTT RecoilCorrections README exactly (same algorithm as
+// DCH_modules/GenBosonMomentum.h's getGenBosonMomentum, self-contained here
+// since this script binds its own branches rather than sharing MyBranch.C's
+// globals):
+//   full:    (fromHardProcessFinalState && (isMuon||isElectron||isNeutrino)) || isDirectHardProcessTauDecayProduct
+//   visible: (fromHardProcessFinalState && (isMuon||isElectron)) || (isDirectHardProcessTauDecayProduct && !isNeutrino)
+// fromHardProcessFinalState = status==1 && statusFlags bit 8 (fromHardProcess).
+// isDirectHardProcessTauDecayProduct = statusFlags bit 10.
+bool findGenBosonAxis(
+    const Branches& b,
+    double& fullPx,
+    double& fullPy,
+    double& visPx,
+    double& visPy
+) {
+    if (!b.genPartPdgId || !b.genPartStatus || !b.genPartStatusFlags ||
+        !b.genPartPt || !b.genPartPhi) return false;
+
+    fullPx = fullPy = visPx = visPy = 0.0;
+    bool found = false;
+
+    for (size_t i = 0; i < b.genPartPdgId->size(); ++i) {
+        const int pdg = std::abs((*b.genPartPdgId)[i]);
+        const bool isLepton = (pdg == 11 || pdg == 13);
+        const bool isNeutrino = (pdg == 12 || pdg == 14 || pdg == 16);
+        if (!isLepton && !isNeutrino) continue;
+
+        const bool fromHardProcessFinalState =
+            (*b.genPartStatus)[i] == 1 && (((*b.genPartStatusFlags)[i] >> 8) & 1);
+        const bool isDirectHardProcessTauDecayProduct =
+            (((*b.genPartStatusFlags)[i] >> 10) & 1);
+
+        if (!((fromHardProcessFinalState && (isLepton || isNeutrino)) || isDirectHardProcessTauDecayProduct)) continue;
+
+        const double px = (*b.genPartPt)[i] * std::cos((*b.genPartPhi)[i]);
+        const double py = (*b.genPartPt)[i] * std::sin((*b.genPartPhi)[i]);
+        fullPx += px;
+        fullPy += py;
+        found = true;
+
+        if ((fromHardProcessFinalState && isLepton) || (isDirectHardProcessTauDecayProduct && !isNeutrino)) {
+            visPx += px;
+            visPy += py;
+        }
+    }
+    return found;
 }
 
 int ptBin(double pt) {
@@ -237,7 +288,7 @@ std::unique_ptr<OfficialMETCorrections> loadMETCorrections(
     const std::string& year,
     bool isData
 ) {
-    const std::string fileName = "../../json_files/met_" + year + ".json.gz";
+    const std::string fileName = "json_files/met_" + year + ".json.gz";
     const std::string suffix = isData ? "data" : "mc";
 
     try {
@@ -284,7 +335,9 @@ bool correctedMET(
 }
 
 std::unique_ptr<TH1D> loadZPtWeights(const std::string& year) {
-    const std::string fileName = "../../Dependencies/zpt_weights/" + year + "/ZPtWeights_" + year + ".root";
+    const std::string fileName =
+        "../../Dependencies/zpt_weights/" +
+        year + "/ZPtWeights_" + year + ".root";
     std::unique_ptr<TFile> file(TFile::Open(fileName.c_str(), "READ"));
     if (!file || file->IsZombie()) return nullptr;
 
@@ -342,12 +395,14 @@ bool bindBranches(TTree* tree, Branches& b, bool isData) {
         valid &= bind("L1PreFiringWeight_Nom", &b.prefiringWeight);
         valid &= bind("weightPUtruejson", &b.pileupWeight);
         valid &= bind("isTrig_1", &b.isTrig1);
+        valid &= bind("GenPart_pt", &b.genPartPt);
+        valid &= bind("GenPart_phi", &b.genPartPhi);
+        valid &= bind("GenPart_pdgId", &b.genPartPdgId);
+        valid &= bind("GenPart_status", &b.genPartStatus);
+        valid &= bind("GenPart_statusFlags", &b.genPartStatusFlags);
 
         for (int index = 0; index < 2; ++index) {
             const std::string suffix = "_" + std::to_string(index + 1);
-            valid &= bind(("genPartFlav" + suffix).c_str(), &b.genPartFlav[index]);
-            valid &= bind(("pt" + suffix + "_tr").c_str(), &b.truthPt[index]);
-            valid &= bind(("phi" + suffix + "_tr").c_str(), &b.truthPhi[index]);
             valid &= bind(("IDSF" + suffix).c_str(), &b.idSF[index]);
             valid &= bind(("ISOSF" + suffix).c_str(), &b.isoSF[index]);
             valid &= bind(("TrigSF" + suffix).c_str(), &b.trigSF[index]);
@@ -444,19 +499,15 @@ int processFile(
         double axisPx = boson.Px();
         double axisPy = boson.Py();
         double axisPt = boson.Pt();
+        double genPx = axisPx;
+        double genPy = axisPy;
+        double visPx = axisPx;
+        double visPy = axisPy;
 
         if (isDY) {
-            if (b.genPartFlav[0] != 1 || b.genPartFlav[1] != 1 ||
-                !std::isfinite(b.truthPt[0]) || !std::isfinite(b.truthPt[1]) ||
-                !std::isfinite(b.truthPhi[0]) || !std::isfinite(b.truthPhi[1]) ||
-                !(b.truthPt[0] > 0.0) || !(b.truthPt[1] > 0.0)) continue;
-
-            axisPx =
-                b.truthPt[0] * std::cos(b.truthPhi[0]) +
-                b.truthPt[1] * std::cos(b.truthPhi[1]);
-            axisPy =
-                b.truthPt[0] * std::sin(b.truthPhi[0]) +
-                b.truthPt[1] * std::sin(b.truthPhi[1]);
+            if (!findGenBosonAxis(b, genPx, genPy, visPx, visPy)) continue;
+            axisPx = genPx;
+            axisPy = genPy;
             axisPt = std::hypot(axisPx, axisPy);
         }
 
@@ -471,10 +522,14 @@ int processFile(
 
         const double metX = metPt * std::cos(metPhi);
         const double metY = metPt * std::sin(metPhi);
+        const double recoilX = metX + visPx - genPx;
+        const double recoilY = metY + visPy - genPy;
         const double cosPhi = axisPx / axisPt;
         const double sinPhi = axisPy / axisPt;
-        const double uParallel = metX * cosPhi + metY * sinPhi;
-        const double uPerpendicular = -metX * sinPhi + metY * cosPhi;
+        const double uParallel =
+            recoilX * cosPhi + recoilY * sinPhi;
+        const double uPerpendicular =
+            -recoilX * sinPhi + recoilY * cosPhi;
 
         double weight = isData ? 1.0 : nominalWeight(b, crossSectionWeight);
         if (APPLY_ZPT_REWEIGHTING && isDY) {
@@ -859,6 +914,121 @@ void writePayload(
     std::cout << "Wrote recoil payload to " << outputName << std::endl;
 }
 
+std::vector<std::pair<std::string,std::string>> buildFileList(const std::string& year) {
+    std::vector<std::pair<std::string,std::string>> files;
+    const std::map<std::string, std::vector<std::string>> fileMap = getFileMap(year);
+    for (const auto& processEntry : fileMap) {
+        for (const std::string& fileName : processEntry.second) {
+            if (fileName.empty() || fileName.back() == '/') continue;
+            files.push_back({processEntry.first, fileName});
+        }
+    }
+    return files;
+}
+
+void writeAccumulator(Accumulator& accumulator, TFile& output) {
+    output.cd();
+    const int nPtBins = static_cast<int>(ZPT_EDGES.size()) - 1;
+
+    int group = 0;
+    int component = 0;
+    int index = 0;
+    double sumW = 0.0;
+    double sumWX = 0.0;
+    double sumWX2 = 0.0;
+    double sumW2 = 0.0;
+
+    TTree momentsTree("moments", "moments");
+    momentsTree.Branch("group", &group);
+    momentsTree.Branch("component", &component);
+    momentsTree.Branch("index", &index);
+    momentsTree.Branch("sumW", &sumW);
+    momentsTree.Branch("sumWX", &sumWX);
+    momentsTree.Branch("sumWX2", &sumWX2);
+    momentsTree.Branch("sumW2", &sumW2);
+
+    for (group = 0; group < N_GROUPS; ++group) {
+        for (component = 0; component < N_COMPONENTS; ++component) {
+            for (index = 0; index < 3 * nPtBins; ++index) {
+                const Moment& moment = accumulator.moments[group][component][index];
+                sumW = moment.sumW;
+                sumWX = moment.sumWX;
+                sumWX2 = moment.sumWX2;
+                sumW2 = moment.sumW2;
+                momentsTree.Fill();
+
+                TH1D* histogram = accumulator.distributions[group][component][index];
+                if (histogram) histogram->Write();
+            }
+        }
+    }
+    momentsTree.Write();
+}
+
+void readAndAddAccumulator(Accumulator& accumulator, const std::string& fileName) {
+    std::unique_ptr<TFile> input(TFile::Open(fileName.c_str(), "READ"));
+    if (!input || input->IsZombie()) {
+        std::cerr << "[skip] cannot open perfile accumulator: " << fileName << std::endl;
+        return;
+    }
+
+    TTree* momentsTree = dynamic_cast<TTree*>(input->Get("moments"));
+    if (!momentsTree) {
+        std::cerr << "[skip] no moments tree in: " << fileName << std::endl;
+        return;
+    }
+
+    int group = 0;
+    int component = 0;
+    int index = 0;
+    double sumW = 0.0;
+    double sumWX = 0.0;
+    double sumWX2 = 0.0;
+    double sumW2 = 0.0;
+    momentsTree->SetBranchAddress("group", &group);
+    momentsTree->SetBranchAddress("component", &component);
+    momentsTree->SetBranchAddress("index", &index);
+    momentsTree->SetBranchAddress("sumW", &sumW);
+    momentsTree->SetBranchAddress("sumWX", &sumWX);
+    momentsTree->SetBranchAddress("sumWX2", &sumWX2);
+    momentsTree->SetBranchAddress("sumW2", &sumW2);
+
+    const Long64_t nEntries = momentsTree->GetEntries();
+    for (Long64_t entry = 0; entry < nEntries; ++entry) {
+        momentsTree->GetEntry(entry);
+        Moment& target = accumulator.moments[group][component][index];
+        target.sumW += sumW;
+        target.sumWX += sumWX;
+        target.sumWX2 += sumWX2;
+        target.sumW2 += sumW2;
+    }
+
+    const char* groupName[] = {"data", "background", "dy"};
+    const char* componentName[] = {"upar", "uperp"};
+    const int nPtBins = static_cast<int>(ZPT_EDGES.size()) - 1;
+
+    for (int g = 0; g < N_GROUPS; ++g) {
+        for (int c = 0; c < N_COMPONENTS; ++c) {
+            for (int jet = 0; jet < 3; ++jet) {
+                for (int pt = 0; pt < nPtBins; ++pt) {
+                    const int idx = flatBin(jet, pt);
+                    const std::string name = Form("h_%s_%s_njet%d_pt%d", groupName[g], componentName[c], jet, pt);
+                    TH1D* source = dynamic_cast<TH1D*>(input->Get(name.c_str()));
+                    if (!source) continue;
+                    TH1D*& target = accumulator.distributions[g][c][idx];
+                    if (!target) {
+                        target = dynamic_cast<TH1D*>(source->Clone(name.c_str()));
+                        target->SetDirectory(nullptr);
+                    }
+                    else {
+                        target->Add(source);
+                    }
+                }
+            }
+        }
+    }
+}
+
 }
 
 void DeriveRecoilCorrections(std::string year = "2018") {
@@ -935,5 +1105,98 @@ void DeriveRecoilCorrections(std::string year = "2018") {
     writeCompatiblePayload(year, outputDirectory, accumulator);
     std::cout << "Finished " << year << " with " << succeeded
               << " successful and " << failed << " failed input files"
+              << std::endl;
+}
+
+void DeriveRecoilCorrectionsPerFile(std::string year, int fileIndex) {
+    const double lumi = luminosity(year);
+    if (!(lumi > 0.0)) {
+        std::cerr << "ERROR: unsupported year " << year << std::endl;
+        return;
+    }
+
+    const std::vector<std::pair<std::string,std::string>> files = buildFileList(year);
+    if (fileIndex < 0 || fileIndex >= static_cast<int>(files.size())) {
+        std::cerr << "ERROR: invalid fileIndex=" << fileIndex << ", total files=" << files.size() << std::endl;
+        return;
+    }
+
+    std::unique_ptr<OfficialMETCorrections> dataMET = loadMETCorrections(year, true);
+    std::unique_ptr<OfficialMETCorrections> mcMET = loadMETCorrections(year, false);
+    if (!dataMET || !mcMET) return;
+
+    std::unique_ptr<TH1D> zPtWeights;
+    if (APPLY_ZPT_REWEIGHTING) {
+        zPtWeights = loadZPtWeights(year);
+        if (!zPtWeights) {
+            std::cerr << "ERROR: cannot load Z pT weights for " << year << std::endl;
+            return;
+        }
+    }
+
+    const std::string outputDirectory = OUTPUT_BASE + "/" + year + "/perfile";
+    gSystem->mkdir(outputDirectory.c_str(), kTRUE);
+
+    Accumulator accumulator;
+    const int status = processFile(
+        year,
+        files[fileIndex].first,
+        files[fileIndex].second,
+        lumi,
+        accumulator,
+        *dataMET,
+        *mcMET,
+        zPtWeights.get()
+    );
+
+    const std::string baseName = gSystem->BaseName(files[fileIndex].second.c_str());
+    const std::string outputName = outputDirectory + "/" + std::to_string(fileIndex) + "_" + baseName;
+    TFile output(outputName.c_str(), "RECREATE");
+    writeAccumulator(accumulator, output);
+    output.Close();
+
+    std::cout << "Wrote perfile accumulator (status=" << status << ") to " << outputName << std::endl;
+    if (status != 0) gSystem->Exit(status);
+}
+
+void DeriveRecoilCorrectionsMerge(std::string year) {
+    if (year == "Run2") {
+        const std::vector<std::string> years = {
+            "2016preVFP", "2016postVFP", "2017", "2018"
+        };
+        for (const std::string& runYear : years)
+            DeriveRecoilCorrectionsMerge(runYear);
+        return;
+    }
+
+    const std::vector<std::pair<std::string,std::string>> files = buildFileList(year);
+    const std::string perfileDirectory = OUTPUT_BASE + "/" + year + "/perfile";
+
+    Accumulator accumulator;
+    int found = 0;
+    int missing = 0;
+    for (size_t fileIndex = 0; fileIndex < files.size(); ++fileIndex) {
+        const std::string baseName = gSystem->BaseName(files[fileIndex].second.c_str());
+        const std::string perfileName = perfileDirectory + "/" + std::to_string(fileIndex) + "_" + baseName;
+        if (gSystem->AccessPathName(perfileName.c_str())) {
+            std::cerr << "[missing] " << perfileName << std::endl;
+            ++missing;
+            continue;
+        }
+        readAndAddAccumulator(accumulator, perfileName);
+        ++found;
+    }
+
+    if (found == 0) {
+        std::cerr << "ERROR: no perfile accumulators found for " << year << "; no recoil payload was written" << std::endl;
+        gSystem->Exit(2);
+        return;
+    }
+
+    const std::string outputDirectory = OUTPUT_BASE + "/" + year;
+    writePayload(year, outputDirectory, accumulator);
+    writeCompatiblePayload(year, outputDirectory, accumulator);
+    std::cout << "Merged " << year << " with " << found
+              << " found and " << missing << " missing perfile accumulators"
               << std::endl;
 }

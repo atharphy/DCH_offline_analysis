@@ -1,0 +1,13 @@
+executable     = run_derive_merge.sh
+arguments      = $(year)
+output         = logs/derive_recoil_merge_$(year).out
+error          = logs/derive_recoil_merge_$(year).err
+log            = logs/derive_recoil_merge_$(year).log
+request_cpus   = 1
+request_memory = 4000
+request_disk   = 2000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = /afs/cern.ch/user/a/atahmad/.grid_proxy/x509up.pem
+
+queue year in (2016preVFP, 2016postVFP, 2017, 2018)

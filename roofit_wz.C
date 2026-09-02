@@ -1,3 +1,4 @@
+//   root -l -b -q 'roofit_wz.C+("Run2")'
 #include <RooDataSet.h>
 #include <RooExponential.h>
 #include <RooDataHist.h>
@@ -22,12 +23,12 @@ static std::string SIGNAL_MASS_FILTER = "";
 #include "roofit_formatting/RooFitStyle.h"
 
 using namespace RooFit;
-static const std::string ZZ_SF_CSV = "Dependencies/wz_zz_scale_factors/zz_scale_factors.csv";
-static const std::string WZ_SF_CSV = "Dependencies/wz_zz_scale_factors/wz_scale_factors.csv";
+static const std::string ZZ_SF_CSV = "/eos/user/a/atahmad/DCH_offline_analysis/normfits/zz_scale_factors.csv";
+static const std::string WZ_SF_CSV = "/eos/user/a/atahmad/DCH_offline_analysis/normfits/wz_scale_factors.csv";
 
 void roofit_wz(std::string year = "Run2"){
 	std::string region = "CR_3lep0tau";
-	std::string inputDir = "hists/run2_hists_noFR_roccor/";
+	std::string inputDir = "/eos/user/a/atahmad/DCH_offline_analysis/new_hists/run2_noFR_metphi_zpt_recoil_roccor/";
 	std::map<std::string, std::vector<TFile*>> open_files;
 	openInputFiles(year, ensureTrailingSlash(inputDir), "hist_", open_files);
 
@@ -56,7 +57,8 @@ void roofit_wz(std::string year = "Run2"){
 	       	cout<<kv.first<<"\t"<<tot_uncert_quadr[kv.first]<<"\t"<<h_bkg_group[kv.first]->Integral()<<endl;
 		}
 	}
-
+	//ZZ contaminates this CR too -- fix it to its own data-derived normalization,
+	//read automatically (per year) from the CSV roofit_zz.C writes.
 	double zzSF = 1.0;
 	std::ifstream fin(ZZ_SF_CSV);
 	std::string csvLine;
@@ -77,29 +79,30 @@ void roofit_wz(std::string year = "Run2"){
 	h_other_bkg->Add(h_bkg_group["QCD"]);
 	double other_nominal = h_other_bkg->Integral();
 	double other_uncert = sqrt(tot_uncert_quadr["other"]+tot_uncert_quadr["DY"]+tot_uncert_quadr["DY10_50"]+tot_uncert_quadr["ZZ"]+tot_uncert_quadr["WW"]+tot_uncert_quadr["VVV"]+tot_uncert_quadr["ttV"]+tot_uncert_quadr["WJ"]+tot_uncert_quadr["ST"]+tot_uncert_quadr["TTbar"]+tot_uncert_quadr["QCD"])/h_other_bkg->Integral();
-	RooRealVar x("x", "L_{T} variable", 0, 1000);
+	RooRealVar x("x", "L_{T} variable", 0, 1000);//Discriminating Variable
 	RooDataHist other_hist("other_hist", "Other", x, Import(*h_other_bkg));
 	RooHistPdf other_pdf("other_pdf", "Other PDF", x, other_hist);
-
-	RooRealVar other_nuis("other_nuis", "Other nuisance", 0, -5, 5);
-	RooGaussian other_constraint("other_constraint", "Other constraint", other_nuis, RooConst(0.), RooConst(1.));
+	//Add Gaussian constraints for uncertainty
+	RooRealVar other_nuis("other_nuis", "Other nuisance", 0, -5, 5);//initialize with 0 as the scaling to nominal value happens in RooFormulaVar
+	RooGaussian other_constraint("other_constraint", "Other constraint", other_nuis, RooConst(0.), RooConst(1.));//centers at 0. and varies by +-1.
 	RooFormulaVar other_norm_constrained("other_norm_constrained", "@0*(1 + @1*@2)", RooArgList(RooConst(other_nominal), other_nuis, other_uncert));
 	RooRealVar other_norm("other_norm", "Other yield", h_other_bkg->Integral(), 0.0, 10.0 * h_other_bkg->Integral());
 	RooExtendPdf other_ext("other_ext", "Other Extended PDF", other_pdf, other_norm_constrained);
-
+	//WZ component
 	RooDataHist wz_hist("wz_hist", "WZ", x, Import(*h_bkg_group["WZ"]));
 	RooHistPdf wz_pdf("wz_pdf", "WZ PDF", x, wz_hist);
 	RooRealVar wz_norm("wz_norm", "WZ yield", h_bkg_group["WZ"]->Integral(), 0.0, 10.0 * h_bkg_group["WZ"]->Integral());
 	RooExtendPdf wz_ext("wz_ext", "WZ Extended", wz_pdf, wz_norm);
-
+	//Build full model with constraints
 	RooAddPdf model_core("model_core", "Total Model without constraints", RooArgList(wz_ext, other_ext));
 	RooProdPdf model("model", "Model with constraints", RooArgSet(model_core, other_constraint));
-
+	//Fit to data
 	RooDataHist data_obs("data_obs", "Observed Data", x, Import(*h_bkg_group["data"]));
 	model.fitTo(data_obs, Extended(true), PrintLevel(-1));
 	TCanvas c(("c_roofit_wz_" + year).c_str(), "", 1000, 800);
 	RooPlot* frame = x.frame();
-
+	//Plot model_core (the extended sum, no constraint factor) -- plotting model itself
+	//would fold other_constraint's own x-independent normalization into the curve height.
 	data_obs.plotOn(frame, Name("stack_data"));
 	model_core.plotOn(frame, LineColor(kBlue), Name("stack_total"));
 	model_core.plotOn(frame, Components(wz_ext), LineColor(kGreen + 1), Name("stack_wz"));
@@ -121,10 +124,11 @@ void roofit_wz(std::string year = "Run2"){
 	};
 	formatRooFitCanvas(c, frame, "L_{T} [GeV]", year, legendEntries, sfBuf);
 
-	gSystem->mkdir("normfits/plots", kTRUE);
-	c.SaveAs(("normfits/plots/roofit_wz_" + region + "_" + year + ".png").c_str());
+	gSystem->mkdir("/eos/user/a/atahmad/DCH_offline_analysis/normfits/plots", kTRUE);
+	c.SaveAs(("/eos/user/a/atahmad/DCH_offline_analysis/normfits/plots/roofit_wz_" + region + "_" + year + ".png").c_str());
 
-	gSystem->mkdir("normfits", kTRUE);
+	//Save/update this year's WZ scale factor in its own CSV, for later use.
+	gSystem->mkdir("/eos/user/a/atahmad/DCH_offline_analysis/normfits", kTRUE);
 	std::map<std::string, std::string> wzCsvRows;
 	std::ifstream wzFin(WZ_SF_CSV);
 	std::string wzLine;
@@ -135,5 +139,5 @@ void roofit_wz(std::string year = "Run2"){
 	wzFout << "year,scale_factor,error\n";
 	for (auto& kv : wzCsvRows) wzFout << kv.first << "," << kv.second << "\n";
 	wzFout.close();
-	gSystem->CopyFile(WZ_SF_CSV.c_str(), "wz_scale_factors.csv", kTRUE);
+	gSystem->CopyFile(WZ_SF_CSV.c_str(), "wz_scale_factors.csv", kTRUE); //keep an offline/-local copy for Stackhist.C to read
 }

@@ -11,6 +11,6 @@ CORR_BASE=/cvmfs/cms.cern.ch/el9_amd64_gcc11/external/py3-correctionlib/2.1.0-6d
 export ROOT_INCLUDE_PATH="${CORR_BASE}/include:${ROOT_INCLUDE_PATH:-}"
 export LD_LIBRARY_PATH="${CORR_BASE}/lib:${LD_LIBRARY_PATH:-}"
 
-cd Offline_framework/offline_analysis
+cd Updated_offline_framework
 
 root -l -b -q "${SCRIPT}.C+(\"${YEAR}\",${FILEIDX},1,1)"

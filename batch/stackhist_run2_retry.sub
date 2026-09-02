@@ -1,0 +1,13 @@
+executable     = run_stackhist.sh
+arguments      = Stackhist $(year) $(first) 4
+output         = logs/stackhist_$(year)_$(first).out
+error          = logs/stackhist_$(year)_$(first).err
+log            = logs/stackhist_$(year)_$(first).log
+request_cpus   = 1
+request_memory = 16000
+request_disk   = 2000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = /afs/cern.ch/user/a/atahmad/.grid_proxy/x509up.pem
+
+queue year,first from run2_only.txt

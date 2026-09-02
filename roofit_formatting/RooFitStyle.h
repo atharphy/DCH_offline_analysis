@@ -13,7 +13,7 @@
 struct RooFitLegendEntry {
     TObject* obj;
     std::string label;
-    std::string drawOpt;
+    std::string drawOpt; // "f", "lep", "l", ...
 };
 
 inline std::string roofitLumiLabel(const std::string& year) {

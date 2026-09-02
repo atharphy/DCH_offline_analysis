@@ -27,6 +27,27 @@ inline double tauJetSFByIndex(int idx) { if (idx==1) return TauVsJetIDSF_1; if (
 inline bool trigPassedByIndex(int idx) { if (idx==1) return isTrig_1==1 || isTrig_1==2; if (idx==2) return isTrig_1==-1 || isTrig_1==2; if (idx==3) return isTrig_2==1 || isTrig_2==2; if (idx==4) return isTrig_2==-1 || isTrig_2==2; return false; }
 inline double trigSFByIndex(int idx) { if (idx==1) return TrigSF_1; if (idx==2) return TrigSF_2; if (idx==3) return TrigSF_3; if (idx==4) return TrigSF_4; return 1.0; }
 
+// Precomputed Up/Down SF branches written by the skim (outTuple_test.py),
+// read directly instead of recomputing a relative uncertainty on the fly
+// via correctionlib (see sf_uncertainty/LeptonTauSFUncertainty.h, now
+// retired from DCH_tauFR.C/DCH_tight.C in favor of these accessors).
+inline double idSFUpByIndex(int idx) { if (idx==1) return IDSF_Up_1; if (idx==2) return IDSF_Up_2; if (idx==3) return IDSF_Up_3; if (idx==4) return IDSF_Up_4; return 1.0; }
+inline double idSFDownByIndex(int idx) { if (idx==1) return IDSF_Down_1; if (idx==2) return IDSF_Down_2; if (idx==3) return IDSF_Down_3; if (idx==4) return IDSF_Down_4; return 1.0; }
+inline double isoSFUpByIndex(int idx) { if (idx==1) return ISOSF_Up_1; if (idx==2) return ISOSF_Up_2; if (idx==3) return ISOSF_Up_3; if (idx==4) return ISOSF_Up_4; return 1.0; }
+inline double isoSFDownByIndex(int idx) { if (idx==1) return ISOSF_Down_1; if (idx==2) return ISOSF_Down_2; if (idx==3) return ISOSF_Down_3; if (idx==4) return ISOSF_Down_4; return 1.0; }
+inline double trigSFUpByIndex(int idx) { if (idx==1) return TrigSF_Up_1; if (idx==2) return TrigSF_Up_2; if (idx==3) return TrigSF_Up_3; if (idx==4) return TrigSF_Up_4; return 1.0; }
+inline double trigSFDownByIndex(int idx) { if (idx==1) return TrigSF_Down_1; if (idx==2) return TrigSF_Down_2; if (idx==3) return TrigSF_Down_3; if (idx==4) return TrigSF_Down_4; return 1.0; }
+inline double tauEleSFUpByIndex(int idx) { if (idx==1) return TauVsEleIDSF_Up_1; if (idx==2) return TauVsEleIDSF_Up_2; if (idx==3) return TauVsEleIDSF_Up_3; if (idx==4) return TauVsEleIDSF_Up_4; return 1.0; }
+inline double tauEleSFDownByIndex(int idx) { if (idx==1) return TauVsEleIDSF_Down_1; if (idx==2) return TauVsEleIDSF_Down_2; if (idx==3) return TauVsEleIDSF_Down_3; if (idx==4) return TauVsEleIDSF_Down_4; return 1.0; }
+inline double tauMuSFUpByIndex(int idx) { if (idx==1) return TauVsMuIDSF_Up_1; if (idx==2) return TauVsMuIDSF_Up_2; if (idx==3) return TauVsMuIDSF_Up_3; if (idx==4) return TauVsMuIDSF_Up_4; return 1.0; }
+inline double tauMuSFDownByIndex(int idx) { if (idx==1) return TauVsMuIDSF_Down_1; if (idx==2) return TauVsMuIDSF_Down_2; if (idx==3) return TauVsMuIDSF_Down_3; if (idx==4) return TauVsMuIDSF_Down_4; return 1.0; }
+inline double tauJetSFUpByIndex(int idx) { if (idx==1) return TauVsJetIDSF_Up_1; if (idx==2) return TauVsJetIDSF_Up_2; if (idx==3) return TauVsJetIDSF_Up_3; if (idx==4) return TauVsJetIDSF_Up_4; return 1.0; }
+inline double tauJetSFDownByIndex(int idx) { if (idx==1) return TauVsJetIDSF_Down_1; if (idx==2) return TauVsJetIDSF_Down_2; if (idx==3) return TauVsJetIDSF_Down_3; if (idx==4) return TauVsJetIDSF_Down_4; return 1.0; }
+
+inline double tauESByIndex(int idx) { if (idx==1) return TauES_1; if (idx==2) return TauES_2; if (idx==3) return TauES_3; if (idx==4) return TauES_4; return 1.0; }
+inline double tauESUpByIndex(int idx) { if (idx==1) return TauES_Up_1; if (idx==2) return TauES_Up_2; if (idx==3) return TauES_Up_3; if (idx==4) return TauES_Up_4; return 1.0; }
+inline double tauESDownByIndex(int idx) { if (idx==1) return TauES_Down_1; if (idx==2) return TauES_Down_2; if (idx==3) return TauES_Down_3; if (idx==4) return TauES_Down_4; return 1.0; }
+
 inline std::string dilepZFlag(const std::string& catstr) {
     if (catstr.size() != 2) return "";
     if (catstr[0] != catstr[1] || catstr[0] == 't') return "Zveto";
