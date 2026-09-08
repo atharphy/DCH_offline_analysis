@@ -1,5 +1,5 @@
 executable     = run_dch_merge_chunks_persample.sh
-arguments      = /eos/user/a/atahmad/DCH_offline_analysis/new_trees/chunks/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2 /eos/user/a/atahmad/DCH_offline_analysis/new_trees/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst $(year) $(sample) masstree
+arguments      = /eos/user/a/atahmad/DCH_offline_analysis/new_trees/chunks/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2 /eos/user/a/atahmad/DCH_offline_analysis/new_trees/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2 $(year) $(sample) masstree
 output         = logs/dch_tight_merge_persample_trees_$(year)_$(sample).out
 error          = logs/dch_tight_merge_persample_trees_$(year)_$(sample).err
 log            = logs/dch_tight_merge_persample_trees_$(year)_$(sample).log

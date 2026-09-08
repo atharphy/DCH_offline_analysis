@@ -284,15 +284,19 @@ need to be changed together when starting a new production tag:
 | `DCH_tight_Chunk.C` | `outDir` (~line 43), `treeOutDir` (~line 45) | per-chunk histogram + mass-tree output (unbatched) |
 | `DCH_tight_ChunkBatch.C` | `eosHistChunkDir` / `eosTreeChunkDir` (~lines 60-61) | per-chunk-batch histogram + mass-tree output on EOS (production path) |
 | `batch/dch_tight_merge_persample.sub` | `arguments =` line | chunk-source dir and merged-target dir passed to `MergeChunkHists.C` |
+| `batch/dch_tight_merge_persample_trees.sub` | `arguments =` line | same, for the `new_trees/` mass-reco tree merge |
+| `Stackhist.C` / `Stackhist_multiplicity.C` | `INPUT_DIR`, `OUTPUT_DIR` (~lines 43-45) | reads the merged histograms, writes plots to `new_plots/` / `new_mult_plots/` |
 
-In the current snapshot these are all pinned to
-`new_hists/.../run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2` (chunk
-output) and `new_hists/.../run2_noFR_metphi_zpt_recoil_roccor_toppt_syst`
-(merged output, no `_v2` — a naming mismatch inherited as-is from the
-existing production, not something this repo update tried to "fix"). When
-starting a genuinely new production (e.g. after a code change that
-invalidates old output), bump the tag in all four places above to a new
-name so old and new output can never be mixed on disk.
+In the current snapshot these are all pinned to the same
+`run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2` tag end-to-end — chunk
+output, merged `new_hists/`/`new_trees/` output, and `Stackhist*.C`'s
+input/output all agree on the `_v2` suffix. Keep it that way: if you only
+bump the tag in some of the six places above (e.g. the chunk-batch driver
+but not the merge `.sub` target), the merge step silently writes to a
+directory `Stackhist*.C` never reads from — this happened once already in
+this repo's own history. When starting a genuinely new production, bump the
+tag in all six places together, to a new name, so old and new output can
+never be mixed on disk.
 
 ## Running the pipeline
 
