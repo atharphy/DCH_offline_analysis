@@ -412,9 +412,19 @@ condor_submit dch_tight_merge_persample_trees.sub     # new_trees/  (masstree_<s
 ```
 
 Both read the same `batch/mergelist_persample.txt` (one `year,sample` line
-per merge job — regenerate it from whatever samples/years you actually
-processed if it's out of date) and both run
-`run_dch_merge_chunks_persample.sh`, which takes the chunk-source dir,
+per merge job, `sample` being the file's own basename stem — e.g.
+`TTTo2L2Nu_2018`, not the `FileMap.h` process key `TTbar`, since one process
+key can cover several files that each need their own merged output).
+Regenerate it with `root -l -b -q batch/gen_mergelist_persample.C` any time
+the sample set changes — it's derived straight from `filemap/FileMap.h`, so
+it always covers every year/sample `FileMap.h` knows about, including
+signal points. **Don't submit against a stale list**: a `mergelist_persample.txt`
+that's missing samples (or missing years) silently merges nothing for
+them — this happened once already in this repo's own history, when a
+90-line list left over from an earlier partial run quietly excluded every
+signal point, `DY`, and most of the data streams from both merge passes.
+
+Both `.sub` files run `run_dch_merge_chunks_persample.sh`, which takes the chunk-source dir,
 merged-target dir, year, sample, and a file-prefix (`hist` or `masstree`)
 and calls `MergeChunkHists(chunkDir, targetDir, {"<prefix>_<sample>.root"})`.
 A sample/year with no signal-shape chunks at all (e.g. a background sample
