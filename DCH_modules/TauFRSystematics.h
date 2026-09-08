@@ -11,7 +11,7 @@
 
 #include "TauFakeRate.h"
 
-const std::string kTauFRSystematicsBase = "/afs/cern.ch/user/a/atahmad/updated_analysis/CMSSW_13_0_10/src/Offline_framework/offline/systematics/results";
+const std::string kTauFRSystematicsBase = "systematics/results";
 
 const std::vector<std::pair<std::string,std::string>> kTauFRSystematicSources = {
     {"dy_mc", "DyMc"},

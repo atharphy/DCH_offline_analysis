@@ -24,7 +24,7 @@ static std::string SIGNAL_MASS_FILTER = "";
 #include "roofit_formatting/RooFitStyle.h"
 
 using namespace RooFit;
-static const std::string ZZ_SF_CSV = "/eos/user/a/atahmad/DCH_offline_analysis/normfits/zz_scale_factors.csv";
+static const std::string ZZ_SF_CSV = "normfits/zz_scale_factors.csv";
 
 void roofit_zz(std::string year = "Run2"){
 	std::string region = "CR_0tau";

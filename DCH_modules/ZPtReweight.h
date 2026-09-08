@@ -10,7 +10,7 @@
 #include "TH1D.h"
 
 inline TH1D* loadZPtWeights(const std::string& year) {
-    const std::string fileName = "/eos/user/a/atahmad/DCH_offline_analysis/zpt_studies/" + year + "/ZPtWeights_" + year + ".root";
+    const std::string fileName = "zpt_weights/" + year + "/ZPtWeights_" + year + ".root";
     std::unique_ptr<TFile> file(TFile::Open(fileName.c_str(), "READ"));
     if (!file || file->IsZombie()) {
         std::cerr << "ERROR: cannot open Z pT correction file:\n  " << fileName << std::endl;

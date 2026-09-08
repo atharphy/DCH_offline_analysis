@@ -16,19 +16,39 @@ snapshot calls them.
 
 ## Requirements
 
-- CMSSW environment with ROOT 6.26+ (tested under `CMSSW_13_0_10`, `el9_amd64_gcc11`, on lxplus).
-- [`correctionlib`](https://github.com/cms-nanoAOD/correctionlib), via CVMFS:
+- A CMSSW area with ROOT 6.26+ (tested under `CMSSW_13_0_10`, `el9_amd64_gcc11`,
+  on lxplus). If you don't have one yet:
   ```bash
   source /cvmfs/cms.cern.ch/cmsset_default.sh
-  cd <your CMSSW_X_Y_Z/src>
-  eval `scramv1 runtime -sh`
+  cmsrel CMSSW_13_0_10          # or: scram project CMSSW CMSSW_13_0_10
+  cd CMSSW_13_0_10/src
+  cmsenv                        # equivalent to `eval `scramv1 runtime -sh``
+  git clone <this-repo-url> DCH_offline_analysis
+  cd DCH_offline_analysis
+  ```
+- **Build the vendored `HTT-utilities` package once** (needed before running
+  anything that uses recoil corrections, i.e. essentially every driver):
+  ```bash
+  cd $CMSSW_BASE/src
+  scram b -j4
+  ```
+  This isn't optional bookkeeping: `DCH_tight*.C` load recoil corrections via
+  `R__LOAD_LIBRARY(libHTT-utilitiesRecoilCorrections.so)`, a *compiled*
+  library that CMSSW's build system discovers from `HTT-utilities/`'s
+  `BuildFile.xml` — ACLiC alone (`.C+`) never builds it. `scram b` finds and
+  builds `BuildFile.xml`-bearing directories anywhere under `$CMSSW_BASE/src`
+  recursively, including nested inside this repo, so no special path setup is
+  needed beyond running it once from `$CMSSW_BASE/src` after cloning. Rebuild
+  (`scram b -j4`) any time you pull changes to `HTT-utilities/`.
+- [`correctionlib`](https://github.com/cms-nanoAOD/correctionlib), via CVMFS:
+  ```bash
   CORR_BASE=/cvmfs/cms.cern.ch/el9_amd64_gcc11/external/py3-correctionlib/2.1.0-6dc02863165bc2126b8299c5b63785af/lib/python3.9/site-packages/correctionlib
   export ROOT_INCLUDE_PATH="${CORR_BASE}/include:${ROOT_INCLUDE_PATH:-}"
   export LD_LIBRARY_PATH="${CORR_BASE}/lib:${LD_LIBRARY_PATH:-}"
   ```
-  Every `root -l -b -q` invocation below assumes this environment is
-  already sourced and that you're running from the repository root
-  (typically checked out as `<CMSSW>/src/DCH_offline_analysis`).
+  Every `root -l -b -q` invocation below assumes `cmsenv` has been sourced,
+  `correctionlib` is exported as above, `HTT-utilities` has been built, and
+  the shell's current directory is the repository root.
 - A valid grid proxy, for reading input skims over `xrootd` and for condor
   job submission:
   ```bash
@@ -38,9 +58,15 @@ snapshot calls them.
 
 Everything else the pipeline needs at runtime — recoil-correction payloads,
 Rochester muon-correction tables, Z-pT/tau-FR/QCD-FR weight files, golden
-JSONs — is vendored in this repository (see the directory map below), so no
-separate checkout of external packages is required beyond `correctionlib`
-itself.
+JSONs — is vendored in this repository and resolved with plain paths
+relative to the repository root (never `$CMSSW_BASE`-relative, never a
+hardcoded personal `/eos` or `/afs` path), so no separate checkout of
+external packages is required beyond `correctionlib` itself, and cloning
+this repo anywhere under `$CMSSW_BASE/src` is sufficient — no sibling
+packages need to be checked out alongside it. The only paths that are
+*meant* to stay external are input skim locations (`filemap/FileMap.h`) and
+each driver's own output directory (`DCH_tight*.C`, `Stackhist*.C` — see
+"Where output directories are set" below).
 
 ## Directory map
 
@@ -66,10 +92,22 @@ recoil_studies/                standalone macros that derived the recoil-correct
 systematics/results/           cached intermediate results from various systematic derivations
 
 roccor/                      Rochester muon-momentum correction library (vendored, third-party)
-HTT-utilities/                 recoil-correction library (vendored, third-party)
+HTT-utilities/                 recoil-correction library (vendored, third-party -- see note below)
 fake_rates/                    tau/QCD fake-rate ROOT files + the scripts that built them
 json_files/                     golden JSON (lumi mask) files, gzipped, per year
+zpt_weights/                    Z-pT reweighting histograms, per year (vendored)
+normfits/                       WZ/ZZ normalization scale factors used by roofit_wz.C/roofit_zz.C (vendored)
 ```
+
+**Note on `HTT-utilities/`**: the upstream `RecoilCorrector`/`MEtSys`
+constructors (`src/RecoilCorrector.cc`, `src/MEtSys.cc`) hardcode their
+payload path as `$CMSSW_BASE/src/<fileName>`, which assumes `HTT-utilities`
+is checked out as its own top-level sibling package directly under
+`$CMSSW_BASE/src/` -- not nested inside another repo. Since it's vendored
+*inside* this repo instead, both constructors were patched here to just use
+the path they're given as-is (repo-relative, matching every other module).
+This is the one piece of vendored third-party code in this repo that isn't
+byte-for-byte upstream; everything else is copied verbatim.
 
 ## DCH_modules — what each file does and how it links to DCH_tight.C
 
@@ -353,34 +391,51 @@ repeatedly, check `batch/logs/*.err` for that job first.
 
 ### 4. Merging chunks into per-sample files
 
-Once all chunk-batch jobs for a sample have finished:
+`MergeChunkHists.C` is generic: it groups any `<base>_chunk<N>.root` files
+in a source directory by `<base>`, sums their histograms, concatenates
+(via `TChain::CloneTree`) any `TTree`s they contain, writes one merged file
+per base into the target directory, and deletes the consumed chunk files on
+success. It doesn't care whether `<base>` starts with `hist_` or
+`masstree_` — but **the histogram output (`new_hists/`) and the
+signal-shape tree output (`new_trees/`) live in separate directory trees**
+(see "Where output directories are set" above), so they need two separate
+merge passes, not one:
 
 ```bash
 cd batch
-condor_submit dch_tight_merge_persample.sub
+condor_submit dch_tight_merge_persample.sub          # new_hists/  (hist_<sample>_<year>.root)
+condor_submit dch_tight_merge_persample_trees.sub     # new_trees/  (masstree_<sample>_<year>.root)
 ```
 
-`batch/mergelist_persample.txt` (one `year,sample` line per merge job) is
-what's queued — regenerate it from whatever samples/years you actually
-processed if it's out of date. Each job runs `MergeChunkHists.C` for one
-`(year, sample)`, producing
-`new_hists/<merged-tag>/<year>/hist_<sample>_<year>.root` from the chunk
-files, concatenating the signal-shape trees the same way, and **deleting
-the consumed chunk files on success** — so re-running a merge job for a
-sample that already succeeded will find no chunks left and produce nothing.
+Both read the same `batch/mergelist_persample.txt` (one `year,sample` line
+per merge job — regenerate it from whatever samples/years you actually
+processed if it's out of date) and both run
+`run_dch_merge_chunks_persample.sh`, which takes the chunk-source dir,
+merged-target dir, year, sample, and a file-prefix (`hist` or `masstree`)
+and calls `MergeChunkHists(chunkDir, targetDir, {"<prefix>_<sample>.root"})`.
+A sample/year with no signal-shape chunks at all (e.g. a background sample
+that never produced a 3-/4-lepton event) simply merges zero files in the
+tree pass — not an error, nothing to do.
+
+Once a merge job succeeds, its consumed chunk files are gone — so
+re-running it for a sample that already succeeded finds no chunks left and
+does nothing (safe to re-submit, e.g. after fixing a held job elsewhere).
 
 For a one-off/interactive merge of a single sample:
 
 ```bash
-root -l -b -q 'MergeChunkHists.C("new_hists/chunks/<tag>/2018", "new_hists/<merged-tag>/2018", {"hist_TTTo2L2Nu.root"})'
+root -l -b -q 'MergeChunkHists.C("new_hists/chunks/<tag>/2018", "new_hists/<merged-tag>/2018", {"hist_TTTo2L2Nu_2018.root"})'
+root -l -b -q 'MergeChunkHists.C("new_trees/chunks/<tag>/2018", "new_trees/<merged-tag>/2018", {"masstree_TTTo2L2Nu_2018.root"})'
 ```
 
-(third argument is the list of *source* file names, i.e. what the unchunked
-run would have produced — `MergeChunkHists.C` looks for
-`hist_TTTo2L2Nu_chunk*.root` under the source dir and writes
-`hist_TTTo2L2Nu.root` under the target dir.)
+(third argument is the list of *source* file base names, i.e. what the
+unchunked run would have produced — `MergeChunkHists.C` looks for
+`<base minus .root>_chunk*.root` under the source dir and writes `<base>`
+under the target dir.)
 
 ### 5. Downstream stacking
+
+Interactively, for one year:
 
 ```bash
 root -l -b -q 'Stackhist.C+("2018")'
@@ -390,6 +445,24 @@ root -l -b -q 'Stackhist_multiplicity.C+("2018")'
 reads the merged `hist_<sample>_<year>.root` files and produces data/MC
 stack plots per region (and, for the `_multiplicity` variant, split by
 lepton multiplicity).
+
+Both scripts loop over many histogram variables, which is slow enough to be
+worth condor-parallelizing the same way production is: `batch/filelist_stackhist.txt`
+has one `year,first` line per variable index, and
+
+```bash
+cd batch
+condor_submit stackhist.sub                # -> Stackhist.C
+condor_submit stackhist_multiplicity.sub   # -> Stackhist_multiplicity.C
+```
+
+runs one job per `(year, variable index)` via `run_stackhist.sh`, which does
+`.L <Stackhist|Stackhist_multiplicity>.C+` and calls
+`<Script>("<year>",<first>,1)` (i.e. exactly one variable per job). Both
+submission files read the *input* histogram directory from `Stackhist.C`'s/
+`Stackhist_multiplicity.C`'s own hardcoded `INPUT_DIR` (see "Where output
+directories are set" above) — update that constant, not the `.sub` file, to
+point at a different production tag.
 
 ## Notes
 

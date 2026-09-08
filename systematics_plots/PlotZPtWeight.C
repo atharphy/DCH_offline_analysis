@@ -22,7 +22,7 @@ void PlotZPtWeight() {
     gStyle->SetOptStat(0);
     for (const auto& year : kYears) {
         std::cout << "=== " << year << " ===" << std::endl;
-        const std::string fileName = "/eos/user/a/atahmad/DCH_offline_analysis/zpt_studies/" + year + "/ZPtWeights_" + year + ".root";
+        const std::string fileName = "zpt_weights/" + year + "/ZPtWeights_" + year + ".root";
         TFile* f = TFile::Open(fileName.c_str(), "READ");
         if (!f || f->IsZombie()) { std::cerr << "ERROR: cannot open " << fileName << std::endl; continue; }
         TH1D* hNom = (TH1D*)f->Get("h_zpt_weight_ee");

@@ -40,12 +40,7 @@ inline std::unique_ptr<RoccoR> loadRoccoRCorrections(const std::string& year) {
         return nullptr;
     }
 
-    const char* cmsswBase = std::getenv("CMSSW_BASE");
-    if (!cmsswBase) {
-        std::cerr << "ERROR: CMSSW_BASE not set, cannot resolve RoccoR calibration" << std::endl;
-        return nullptr;
-    }
-    const std::string fileName = std::string(cmsswBase) + "/src/Offline_framework/offline/roccor/" + payload;
+    const std::string fileName = "roccor/" + payload;
 
     try {
         std::unique_ptr<RoccoR> rc(new RoccoR(fileName));

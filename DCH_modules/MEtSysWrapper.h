@@ -18,12 +18,9 @@ inline std::vector<std::string> metSysPayloadCandidates(const std::string& year)
 }
 
 inline std::shared_ptr<MEtSys> loadMEtSys(const std::string& year) {
-    const char* cmsswBase = std::getenv("CMSSW_BASE");
     const std::vector<std::string> candidates = metSysPayloadCandidates(year);
-    if (!cmsswBase || candidates.empty()) return nullptr;
     for (const std::string& payload : candidates) {
-        const std::string fullPath = std::string(cmsswBase) + "/src/" + payload;
-        if (!gSystem->AccessPathName(fullPath.c_str())) return std::make_shared<MEtSys>(payload.c_str());
+        if (!gSystem->AccessPathName(payload.c_str())) return std::make_shared<MEtSys>(payload.c_str());
     }
     return nullptr;
 }

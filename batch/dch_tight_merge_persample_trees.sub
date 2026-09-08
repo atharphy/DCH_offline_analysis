@@ -1,0 +1,13 @@
+executable     = run_dch_merge_chunks_persample.sh
+arguments      = /eos/user/a/atahmad/DCH_offline_analysis/new_trees/chunks/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2 /eos/user/a/atahmad/DCH_offline_analysis/new_trees/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst $(year) $(sample) masstree
+output         = logs/dch_tight_merge_persample_trees_$(year)_$(sample).out
+error          = logs/dch_tight_merge_persample_trees_$(year)_$(sample).err
+log            = logs/dch_tight_merge_persample_trees_$(year)_$(sample).log
+request_cpus   = 1
+request_memory = 2000
+request_disk   = 2000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = /afs/cern.ch/user/a/atahmad/.grid_proxy/x509up.pem
+
+queue year,sample from mergelist_persample.txt

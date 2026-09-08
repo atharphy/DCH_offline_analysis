@@ -34,21 +34,19 @@ inline std::vector<std::string> recoilPayloadCandidates(const std::string& year)
 }
 
 inline std::unique_ptr<RecoilCorrector> loadRecoilCorrector(const std::string& year) {
-    const char* cmsswBase = std::getenv("CMSSW_BASE");
     const std::vector<std::string> candidates = recoilPayloadCandidates(year);
-    if (!cmsswBase || candidates.empty()) {
+    if (candidates.empty()) {
         std::cerr << "ERROR: cannot resolve recoil payload for " << year << std::endl;
         return nullptr;
     }
     for (const std::string& payload : candidates) {
-        const std::string fullPath = std::string(cmsswBase) + "/src/" + payload;
-        if (!gSystem->AccessPathName(fullPath.c_str())) {
-            std::cout << "Loaded recoil corrections from:\n  " << fullPath << std::endl;
+        if (!gSystem->AccessPathName(payload.c_str())) {
+            std::cout << "Loaded recoil corrections from:\n  " << payload << std::endl;
             return std::unique_ptr<RecoilCorrector>(new RecoilCorrector(payload.c_str()));
         }
     }
     std::cerr << "ERROR: no recoil payload found for " << year << ". Checked:" << std::endl;
-    for (const std::string& payload : candidates) std::cerr << "  " << std::string(cmsswBase) + "/src/" + payload << std::endl;
+    for (const std::string& payload : candidates) std::cerr << "  " << payload << std::endl;
     return nullptr;
 }
 
