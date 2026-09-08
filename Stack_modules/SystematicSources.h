@@ -33,14 +33,15 @@ static const std::vector<SystSource> kAllKnownSystSources = {
     {"tauVsEle", "_tauVsEleUp", "_tauVsEleDown"},
     {"tauVsMu", "_tauVsMuUp", "_tauVsMuDown"},
     {"tauVsJet", "_tauVsJetUp", "_tauVsJetDown"},
-    {"tauES", "_tauESUp", "_tauESDown"}
+    {"tauES", "_tauESUp", "_tauESDown"},
+    {"topPt", "_topPtUp", "_topPtDown"}
 };
 
 static const std::vector<SystSource> kAllSystSources = {
-    {"frStat", "_frUp", "_frDown"},
-    {"frEtauStat", "_frEtauStatUp", "_frEtauStatDown"},
-    {"frDyMc", "_frDyMcUp", "_frDyMcDown"},
-    {"frWJets", "_frWJetsUp", "_frWJetsDown"},
+    // {"frStat", "_frUp", "_frDown"},
+    // {"frEtauStat", "_frEtauStatUp", "_frEtauStatDown"},
+    // {"frDyMc", "_frDyMcUp", "_frDyMcDown"},
+    // {"frWJets", "_frWJetsUp", "_frWJetsDown"},
     // {"frWJetsMc", "_frWJetsMcUp", "_frWJetsMcDown"},
     // {"frQcdMc", "_frQcdMcUp", "_frQcdMcDown"},
     // {"frTtMc", "_frTtMcUp", "_frTtMcDown"},
@@ -60,7 +61,8 @@ static const std::vector<SystSource> kAllSystSources = {
     {"tauVsEle", "_tauVsEleUp", "_tauVsEleDown"},
     {"tauVsMu", "_tauVsMuUp", "_tauVsMuDown"},
     {"tauVsJet", "_tauVsJetUp", "_tauVsJetDown"},
-    {"tauES", "_tauESUp", "_tauESDown"}
+    {"tauES", "_tauESUp", "_tauESDown"},
+    {"topPt", "_topPtUp", "_topPtDown"}
 };
 
 inline bool endsWith(const std::string& s, const std::string& suffix) {

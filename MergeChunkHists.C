@@ -20,15 +20,24 @@
 #include <TSystem.h>
 #include <TSystemDirectory.h>
 #include <TList.h>
+#include <TChain.h>
+#include <TTree.h>
 
 #include <algorithm>
 #include <iostream>
 #include <map>
 #include <regex>
+#include <set>
 #include <string>
 #include <vector>
 
-void MergeChunkHists(std::string chunkDir, std::string targetDir) {
+// allowedBases: if non-empty, only sample base names in this set are merged
+// -- everything else found in chunkDir is left untouched. Lets multiple
+// processes each own a disjoint slice of the same chunkDir/targetDir pair
+// safely in parallel (disjoint chunk files read/deleted, disjoint output
+// files written), rather than all racing over every sample found.
+void MergeChunkHists(std::string chunkDir, std::string targetDir, std::vector<std::string> allowedBases = {}) {
+    std::set<std::string> allowedSet(allowedBases.begin(), allowedBases.end());
     gSystem->mkdir(targetDir.c_str(), kTRUE);
     TSystemDirectory dir("chunks", chunkDir.c_str());
     TList* entries = dir.GetListOfFiles();
@@ -44,11 +53,13 @@ void MergeChunkHists(std::string chunkDir, std::string targetDir) {
         std::smatch m;
         if (!std::regex_match(name, m, chunkPattern)) continue;
         std::string base = m[1].str() + ".root";
+        if (!allowedSet.empty() && allowedSet.find(base) == allowedSet.end()) continue;
         groups[base].push_back(chunkDir + "/" + name);
     }
     delete entries;
 
-    std::cout << "Found " << groups.size() << " sample(s) to merge in " << chunkDir << std::endl;
+    std::cout << "Found " << groups.size() << " sample(s) to merge in " << chunkDir
+               << (allowedSet.empty() ? "" : " (filtered slice)") << std::endl;
 
     for (auto& kv : groups) {
         const std::string& base = kv.first;
@@ -57,6 +68,7 @@ void MergeChunkHists(std::string chunkDir, std::string targetDir) {
         std::cout << "  merging " << chunkFiles.size() << " chunk(s) -> " << base << std::endl;
 
         std::map<std::string, TH1*> merged;
+        std::set<std::string> treeNames;
         TH1* normHist = nullptr;
 
         for (const auto& path : chunkFiles) {
@@ -67,7 +79,12 @@ void MergeChunkHists(std::string chunkDir, std::string targetDir) {
             while ((key = (TKey*)keyIter())) {
                 TObject* keyObj = key->ReadObj();
                 TH1* h = dynamic_cast<TH1*>(keyObj);
-                if (!h) { delete keyObj; continue; }
+                if (!h) {
+                    TTree* t = dynamic_cast<TTree*>(keyObj);
+                    if (t) treeNames.insert(t->GetName());
+                    delete keyObj;
+                    continue;
+                }
                 std::string hname = h->GetName();
                 if (hname == "hNWEvts" || hname == "hNEvts") {
                     if (!normHist) { normHist = (TH1*)h->Clone(hname.c_str()); normHist->SetDirectory(nullptr); }
@@ -90,13 +107,28 @@ void MergeChunkHists(std::string chunkDir, std::string targetDir) {
         }
 
         std::string outPath = targetDir + "/" + base;
-        TFile* fout = TFile::Open(outPath.c_str(), "RECREATE");
+        TFile* fout = TFile::Open(outPath.c_str(), "RECREATE", "", ROOT::CompressionSettings(ROOT::kLZMA, 9));
+        if (!fout || fout->IsZombie()) {
+            std::cerr << "    [skip] cannot create output file: " << outPath << std::endl;
+            if (fout) fout->Close();
+            delete fout;
+            for (auto& hkv : merged) delete hkv.second;
+            delete normHist;
+            continue;  // leave this sample's chunks in place -- nothing was written or deleted
+        }
         fout->cd();
         if (normHist) normHist->Write();
         for (auto& hkv : merged) hkv.second->Write();
+        for (const auto& tname : treeNames) {
+            TChain chain(tname.c_str());
+            for (const auto& path : chunkFiles) chain.Add(path.c_str());
+            fout->cd();
+            TTree* mergedTree = chain.CloneTree(-1);
+            mergedTree->Write();
+        }
         fout->Close();
         delete fout;
-        std::cout << "    wrote " << outPath << " (" << merged.size() << " histograms)" << std::endl;
+        std::cout << "    wrote " << outPath << " (" << merged.size() << " histograms, " << treeNames.size() << " tree(s))" << std::endl;
 
         // These were heap-cloned above and are never attached to a TFile
         // directory (SetDirectory(nullptr)), so nothing but us owns them --

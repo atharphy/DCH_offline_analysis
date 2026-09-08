@@ -1,11 +1,5 @@
 #pragma once
 
-// Binned (pT, |eta|) reader for the jet->tau_h fake-rate SF = f_data/f_DY_MC
-// (CMS-AN-24-174 Sec. 8.2 / CMS-AN-19-111 Appendix J style correction),
-// built by fake_rates/tau_fake_rates/BuildTauFakeRateSF.C. Deliberately not
-// TauFRReader: that reader clamps its return value to <1, which is correct
-// for a probability but wrong for an SF (SF regularly exceeds 1).
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>

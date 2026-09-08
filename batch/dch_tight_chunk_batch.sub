@@ -1,0 +1,13 @@
+executable     = run_dch_chunkbatch.sh
+arguments      = DCH_tight_ChunkBatch $(year) $(idx) $(batchstart) $(numinbatch)
+output         = logs/dch_tight_chunkbatch_$(year)_$(idx)_$(batchstart).out
+error          = logs/dch_tight_chunkbatch_$(year)_$(idx)_$(batchstart).err
+log            = logs/dch_tight_chunkbatch_$(year)_$(idx)_$(batchstart).log
+request_cpus   = 1
+request_memory = 1500
+request_disk   = 3000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = /afs/cern.ch/user/a/atahmad/.grid_proxy/x509up.pem
+
+queue year,idx,batchstart,numinbatch from batched_chunklist.txt

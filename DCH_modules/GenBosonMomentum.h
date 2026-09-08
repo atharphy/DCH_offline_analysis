@@ -2,12 +2,6 @@
 
 #include <cmath>
 
-// Follows the CMS-HTT RecoilCorrections README exactly:
-//   full:    (fromHardProcessFinalState && (isMuon||isElectron||isNeutrino)) || isDirectHardProcessTauDecayProduct
-//   visible: (fromHardProcessFinalState && (isMuon||isElectron)) || (isDirectHardProcessTauDecayProduct && !isNeutrino)
-// fromHardProcessFinalState = status==1 && statusFlags bit 8 (fromHardProcess).
-// isDirectHardProcessTauDecayProduct = statusFlags bit 10.
-// Verified against CMSSW_13_0_10 DataFormats/HepMCCandidate/interface/{GenParticle,GenStatusFlags}.h.
 inline bool getGenBosonMomentum(double& fullPx, double& fullPy, double& visPx, double& visPy) {
     if (!GenPart_pdgId || !GenPart_status || !GenPart_statusFlags || !GenPart_pt || !GenPart_phi) return false;
 

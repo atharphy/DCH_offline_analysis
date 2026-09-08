@@ -28,11 +28,19 @@ string applyHEMveto(string cat){
 }
 	
 
+// TauES_N falls back to a non-positive sentinel when the skim couldn't
+// compute a decay-mode-aware shift for that slot (same convention
+// DCH_modules/TauESSystematic.h already guards against for the Up/Down
+// variants). Applying it unconditionally would zero/negate pt_N for a
+// perfectly valid tight tau -- silently corrupting its kinematics, and in
+// drivers that gate object validity on pt after this call, silently
+// dropping the object and collapsing its final-state category. Leaving
+// pt_N/m_N unshifted when the value isn't sane is the safe fallback.
 void applyTauES(string cat){
-    if (cat.size() > 0 && cat[0] == 't'){ pt_1 *= TauES_1; m_1 *= TauES_1; }
-    if (cat.size() > 1 && cat[1] == 't'){ pt_2 *= TauES_2; m_2 *= TauES_2; }
-    if (cat.size() > 2 && cat[2] == 't'){ pt_3 *= TauES_3; m_3 *= TauES_3; }
-    if (cat.size() > 3 && cat[3] == 't'){ pt_4 *= TauES_4; m_4 *= TauES_4; }
+    if (cat.size() > 0 && cat[0] == 't' && TauES_1 > 0.0){ pt_1 *= TauES_1; m_1 *= TauES_1; }
+    if (cat.size() > 1 && cat[1] == 't' && TauES_2 > 0.0){ pt_2 *= TauES_2; m_2 *= TauES_2; }
+    if (cat.size() > 2 && cat[2] == 't' && TauES_3 > 0.0){ pt_3 *= TauES_3; m_3 *= TauES_3; }
+    if (cat.size() > 3 && cat[3] == 't' && TauES_4 > 0.0){ pt_4 *= TauES_4; m_4 *= TauES_4; }
 }
 
 

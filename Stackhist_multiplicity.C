@@ -40,8 +40,8 @@ static bool DRAW_BANDS = true;
 static bool USE_LOG_Y = false;
 static bool EVENTS_PER_BIN_WIDTH = false;
 static bool blind_SR = true;
-static std::string INPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_hists/run2_noFR_metphi_zpt_recoil_roccor_v2/";
-static std::string OUTPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_mult_plots/run2_noFR_metphi_zpt_recoil_roccor_v2/";
+static std::string INPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_hists/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2/";
+static std::string OUTPUT_DIR = "/eos/user/a/atahmad/DCH_offline_analysis/new_mult_plots/run2_noFR_metphi_zpt_recoil_roccor_toppt_syst_v2/";
 
 #include "Stack_modules/Labels.h"
 #include "Stack_modules/HistCache.h"

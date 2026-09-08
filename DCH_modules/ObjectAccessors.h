@@ -27,10 +27,6 @@ inline double tauJetSFByIndex(int idx) { if (idx==1) return TauVsJetIDSF_1; if (
 inline bool trigPassedByIndex(int idx) { if (idx==1) return isTrig_1==1 || isTrig_1==2; if (idx==2) return isTrig_1==-1 || isTrig_1==2; if (idx==3) return isTrig_2==1 || isTrig_2==2; if (idx==4) return isTrig_2==-1 || isTrig_2==2; return false; }
 inline double trigSFByIndex(int idx) { if (idx==1) return TrigSF_1; if (idx==2) return TrigSF_2; if (idx==3) return TrigSF_3; if (idx==4) return TrigSF_4; return 1.0; }
 
-// Precomputed Up/Down SF branches written by the skim (outTuple_test.py),
-// read directly instead of recomputing a relative uncertainty on the fly
-// via correctionlib (see sf_uncertainty/LeptonTauSFUncertainty.h, now
-// retired from DCH_tauFR.C/DCH_tight.C in favor of these accessors).
 inline double idSFUpByIndex(int idx) { if (idx==1) return IDSF_Up_1; if (idx==2) return IDSF_Up_2; if (idx==3) return IDSF_Up_3; if (idx==4) return IDSF_Up_4; return 1.0; }
 inline double idSFDownByIndex(int idx) { if (idx==1) return IDSF_Down_1; if (idx==2) return IDSF_Down_2; if (idx==3) return IDSF_Down_3; if (idx==4) return IDSF_Down_4; return 1.0; }
 inline double isoSFUpByIndex(int idx) { if (idx==1) return ISOSF_Up_1; if (idx==2) return ISOSF_Up_2; if (idx==3) return ISOSF_Up_3; if (idx==4) return ISOSF_Up_4; return 1.0; }

@@ -15,13 +15,6 @@
 const bool APPLY_ROCCOR_DATA = true;
 const bool APPLY_ROCCOR_MC   = true;
 
-// Own GenPart-level match (deltaR < 0.3, same threshold as GenZMatching.h)
-// for the reco muon's true gen pt, rather than relying on the skim's own
-// precomputed truthPt/genPartFlav branches -- those reflect whatever
-// reco-truth-matching the skim producer did at production time, while this
-// looks at GenPart directly, so it finds a genuine prompt gen muon whenever
-// one actually exists next to the reco muon. Genuinely non-prompt/fake
-// muons still correctly find no match (there is no gen muon to find).
 inline bool findGenMuonPt(double recoEta, double recoPhi, double& genPt) {
     if (!GenPart_pdgId || !GenPart_pt || !GenPart_eta || !GenPart_phi) return false;
     int bestIdx = -1;
@@ -47,8 +40,6 @@ inline std::unique_ptr<RoccoR> loadRoccoRCorrections(const std::string& year) {
         return nullptr;
     }
 
-    // CMSSW_BASE-relative, not CWD-relative -- callers outside offline/
-    // itself (e.g. ditau_mass_study/) would otherwise resolve this wrong.
     const char* cmsswBase = std::getenv("CMSSW_BASE");
     if (!cmsswBase) {
         std::cerr << "ERROR: CMSSW_BASE not set, cannot resolve RoccoR calibration" << std::endl;
@@ -90,12 +81,7 @@ inline void applyRoccoRCorrection(const std::string& cat, bool isData, const Roc
                 sf = rc.kSpreadMC(q, pt, eta, phi, genPt);
                 err = rc.kSpreadMCerror(q, pt, eta, phi, genPt);
             } else {
-                // kSmearMC/kExtra call CrystalBall::invcdf(), which this
-                // framework's RoccoR.h deliberately makes throw (boost's
-                // erf_inv doesn't compile under ACLiC/cling -- see that
-                // file's own top comment). kScaleMC is purely algebraic
-                // (CP[MC][H][F].k(Q,pt), no CrystalBall at all), so it's
-                // the only usable non-gen-matched-MC correction here.
+
                 sf = rc.kScaleMC(q, pt, eta, phi);
                 err = rc.kScaleMCerror(q, pt, eta, phi);
             }
