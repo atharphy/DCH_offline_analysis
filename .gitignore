@@ -1,0 +1,8 @@
+# Condor run-output (created at submit time, never shipped)
+batch/*/logs/*
+!batch/*/logs/.gitkeep
+
+# ACLiC compile artifacts
+*_C.d
+*_C.so
+*_C_ACLiC_dict_rdict.pcm
