@@ -1,0 +1,6 @@
+hists/*
+trees/*
+plots/*
+!hists/.gitkeep
+!trees/.gitkeep
+!plots/.gitkeep

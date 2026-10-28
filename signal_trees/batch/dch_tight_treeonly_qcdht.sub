@@ -1,0 +1,14 @@
+executable     = run_dch_tight_treeonly_qcdht.sh
+environment    = "REPO_DIR=$ENV(PWD)/../.."
+arguments      = $(year) $(idx) $(batchstart) $(numinbatch)
+output         = logs_qcdht/dch_tight_treeonly_qcdht_$(year)_$(idx)_$(batchstart).out
+error          = logs_qcdht/dch_tight_treeonly_qcdht_$(year)_$(idx)_$(batchstart).err
+log            = logs_qcdht/dch_tight_treeonly_qcdht_$(year)_$(idx)_$(batchstart).log
+request_cpus   = 2
+request_memory = 2000
+request_disk   = 2000000
++JobFlavour    = "workday"
+use_x509userproxy = true
+x509userproxy  = $ENV(HOME)/.grid_proxy/x509up.pem
+
+queue year,idx,batchstart,numinbatch from batched_chunklist_treeonly_qcdht.txt
